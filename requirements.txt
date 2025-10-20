@@ -1,0 +1,16 @@
+# requirements.txt
+
+# --- Backend (FastAPI) ---
+fastapi
+uvicorn[standard]
+
+# --- Banco de Dados (SQLAlchemy) ---
+SQLAlchemy
+psycopg2-binary 
+
+# --- RPA (Playwright) ---
+playwright
+python-dotenv
+
+# --- Comunicação (API Client) ---
+requests
