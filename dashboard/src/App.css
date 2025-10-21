@@ -1,4 +1,4 @@
-/* Conteúdo COMPLETO para painel-rpa/src/App.css */
+/* Conteúdo COMPLETO para dashboard/src/App.css */
 
 /* ============================================== */
 /* ===         RESET E ESTILOS GLOBAIS        === */
@@ -20,11 +20,20 @@ body {
   min-height: 100vh;
 }
 
+.loading-screen {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-size: 1.5rem;
+  color: white;
+}
+
 /* ============================================== */
 /* ===             ESTRUTURA GERAL            === */
 /* ============================================== */
 
-.App {
+.main-app {
   text-align: center;
 }
 
@@ -33,7 +42,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 1rem 2rem;
-  font-size: calc(10px + 2vmin);
+  font-size: 1rem;
   color: white;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
@@ -61,28 +70,28 @@ main {
   gap: 2rem;
 }
 
-.message {
-  text-align: center;
-  padding: 1rem;
-  border-radius: 8px;
-  background-color: rgba(91, 192, 222, 0.2);
-  border: 1px solid rgba(91, 192, 222, 0.4);
-  font-weight: bold;
-}
-
-.error {
+.error-message {
   color: #ff6b6b;
+  background-color: rgba(255, 107, 107, 0.1);
+  padding: 10px;
+  border-radius: 8px;
+  margin-top: 1rem;
+  font-size: 0.9rem;
 }
 
-/* ============================================== */
-/* ===          CARDS DE AÇÕES (NOVO)         === */
-/* ============================================== */
-
-.actions-container {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2rem;
+.success-message {
+  color: #50fa7b;
+  background-color: rgba(80, 250, 123, 0.1);
+  padding: 10px;
+  border-radius: 8px;
+  margin-top: 1rem;
+  font-size: 0.9rem;
 }
+
+
+/* ============================================== */
+/* ===          CARDS E FORMULÁRIO            === */
+/* ============================================== */
 
 .card {
   padding: 2rem;
@@ -97,30 +106,40 @@ main {
 
 .card h2 {
   margin-top: 0;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
   color: #ffffff;
   border-bottom: 2px solid #5bc0de;
   padding-bottom: 0.5rem;
   display: inline-block;
 }
 
-.form-container, .import-container {
-  display: flex;
-  flex-direction: column;
+.solicitacao-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
+  align-items: center;
 }
+
+.checkbox-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 10px 0;
+}
+
+#aguardando {
+    width: auto;
+}
+
 
 /* ============================================== */
 /* ===           INPUTS E BOTÕES              === */
 /* ============================================== */
 
-.add-process-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-input[type="text"], input[type="password"] {
+input[type="text"], 
+input[type="number"], 
+input[type="date"], 
+input[type="password"] {
   width: 100%;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -128,10 +147,15 @@ input[type="text"], input[type="password"] {
   font-size: 1rem;
   background: rgba(0, 0, 0, 0.2);
   color: #f0f0f0;
+  -webkit-appearance: none;
 }
 
 input::placeholder {
   color: #a0a0a0;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
 }
 
 button {
@@ -145,6 +169,10 @@ button {
   font-size: 1rem;
   transition: all 0.3s ease;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.solicitacao-form button {
+    grid-column: 1 / -1; /* Botão ocupa a largura total */
 }
 
 button:hover:not(:disabled) {
@@ -167,24 +195,12 @@ button:disabled {
 }
 
 /* ============================================== */
-/* ===             TABELA E FILTROS           === */
+/* ===             TABELA                     === */
 /* ============================================== */
 
-.process-table-container {
-  padding: 2rem;
-  text-align: left;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.15);
+.table-wrapper {
   width: 100%;
   overflow-x: auto;
-}
-
-.process-table-container h2 {
-  margin-bottom: 1.5rem;
 }
 
 table {
@@ -212,82 +228,4 @@ th {
 
 tbody tr:hover {
   background-color: rgba(91, 192, 222, 0.1);
-}
-
-/* === ESTILOS PARA O MODAL DE DETALHES === */
-
-.modal-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.7);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: #2c3e50;
-  padding: 2rem;
-  border-radius: 8px;
-  width: 90%;
-  max-width: 700px;
-  max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-}
-
-.modal-content h3 {
-  margin-top: 0;
-  color: #5bc0de;
-}
-
-.modal-content table {
-  margin-top: 1rem;
-  width: 100%;
-}
-
-.modal-close-button {
-  margin-top: 1.5rem;
-  float: right;
-}
-
-.link-button {
-  background: none;
-  border: none;
-  color: #5bc0de;
-  text-decoration: underline;
-  cursor: pointer;
-  padding: 0;
-  font-size: inherit;
-  font-family: inherit;
-}
-.link-button:hover {
-  color: #ffffff;
-}
-
-.export-container p {
-  margin-bottom: 1.5rem; /* Adiciona um espaço extra no card de exportação */
-}
-
-.filter-buttons {
-  margin-bottom: 20px;
-}
-
-.filter-buttons button {
-  margin-right: 10px;
-  padding: 8px 15px;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  cursor: pointer;
-  background-color: #f0f0f0;
-}
-
-.filter-buttons button.active {
-  background-color: #007bff;
-  color: white;
-  border-color: #007bff;
 }
