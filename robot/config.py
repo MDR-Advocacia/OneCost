@@ -21,3 +21,9 @@ CDP_ENDPOINT = "http://localhost:9222"
 # CORREÇÃO: ID da extensão corrigido, sem o "/page"
 EXTENSION_URL = "chrome-extension://lnidijeaekolpfeckelhkomndglcglhh/index.html"
 
+# --- Configurações da API Interna ---
+# Para rodar localmente fora do Docker, use "http://localhost:8001"
+# Para rodar o robô dentro do Docker (no futuro), usaríamos "http://backend:8000"
+API_BASE_URL = "http://localhost:8001" 
+API_USERNAME = "admin"
+API_PASSWORD = "admin"

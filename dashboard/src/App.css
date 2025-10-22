@@ -1,8 +1,4 @@
-/* Conteúdo COMPLETO para dashboard/src/App.css */
-
-/* ============================================== */
-/* ===         RESET E ESTILOS GLOBAIS        === */
-/* ============================================== */
+/* Reset Básico */
 * {
   box-sizing: border-box;
   margin: 0;
@@ -20,20 +16,86 @@ body {
   min-height: 100vh;
 }
 
-.loading-screen {
+/* ============================================== */
+/* ===         LOGIN (de LoginPage.css)       === */
+/* ============================================== */
+.login-container {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100vh;
-  font-size: 1.5rem;
-  color: white;
+  min-height: 100vh;
+  padding: 2rem;
 }
 
+.login-box {
+  width: 100%;
+  max-width: 400px;
+  padding: 2.5rem;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.15);
+}
+
+.login-logo {
+  height: 50px;
+  margin-bottom: 1rem;
+}
+
+.login-box h2 {
+  margin-bottom: 1.5rem;
+  color: #fff;
+}
+
+.input-group {
+  text-align: left;
+  margin-bottom: 1.5rem;
+}
+
+.input-group input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  font-size: 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  color: #f0f0f0;
+}
+
+.login-button {
+  width: 100%;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  color: white;
+  background-color: #5bc0de;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+}
+
+.login-button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.error-message {
+  color: #ff6b6b;
+  background-color: rgba(255, 107, 107, 0.2);
+  padding: 10px;
+  border-radius: 8px;
+  margin-top: 1rem;
+}
+
+
 /* ============================================== */
-/* ===             ESTRUTURA GERAL            === */
+/* ===       DASHBOARD (de App.css)           === */
 /* ============================================== */
 
-.main-app {
+.App {
   text-align: center;
 }
 
@@ -42,7 +104,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 1rem 2rem;
-  font-size: 1rem;
+  font-size: calc(10px + 2vmin);
   color: white;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
@@ -59,6 +121,7 @@ body {
   display: flex;
   align-items: center;
   gap: 1rem;
+  font-size: 1rem;
 }
 
 main {
@@ -70,29 +133,28 @@ main {
   gap: 2rem;
 }
 
-.error-message {
+/* Mensagens de Formulário */
+.form-message {
+  text-align: center;
+  padding: 0.75rem;
+  border-radius: 8px;
+  margin-top: 1rem;
+  font-weight: bold;
+}
+
+.form-message.error {
+  background-color: rgba(255, 107, 107, 0.2);
+  border: 1px solid rgba(255, 107, 107, 0.4);
   color: #ff6b6b;
-  background-color: rgba(255, 107, 107, 0.1);
-  padding: 10px;
-  border-radius: 8px;
-  margin-top: 1rem;
-  font-size: 0.9rem;
 }
 
-.success-message {
-  color: #50fa7b;
-  background-color: rgba(80, 250, 123, 0.1);
-  padding: 10px;
-  border-radius: 8px;
-  margin-top: 1rem;
-  font-size: 0.9rem;
+.form-message.success {
+  background-color: rgba(46, 204, 113, 0.2);
+  border: 1px solid rgba(46, 204, 113, 0.4);
+  color: #2ecc71;
 }
 
-
-/* ============================================== */
-/* ===          CARDS E FORMULÁRIO            === */
-/* ============================================== */
-
+/* Card Genérico */
 .card {
   padding: 2rem;
   text-align: left;
@@ -113,33 +175,44 @@ main {
   display: inline-block;
 }
 
+/* Formulário de Solicitação */
 .solicitacao-form {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form-group label {
+  font-weight: bold;
+  color: #e0e0e0;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.form-group-checkbox {
+  display: flex;
   align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
 }
 
-.checkbox-container {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 10px 0;
+.form-group-checkbox label {
+  font-weight: normal;
 }
 
-#aguardando {
-    width: auto;
-}
-
-
-/* ============================================== */
-/* ===           INPUTS E BOTÕES              === */
-/* ============================================== */
-
-input[type="text"], 
-input[type="number"], 
-input[type="date"], 
-input[type="password"] {
+input[type="text"],
+input[type="number"],
+input[type="date"] {
   width: 100%;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -147,17 +220,17 @@ input[type="password"] {
   font-size: 1rem;
   background: rgba(0, 0, 0, 0.2);
   color: #f0f0f0;
-  -webkit-appearance: none;
+}
+
+input[type="date"] {
+  color-scheme: dark;
 }
 
 input::placeholder {
   color: #a0a0a0;
 }
 
-input[type="date"]::-webkit-calendar-picker-indicator {
-    filter: invert(1);
-}
-
+/* Botões */
 button {
   padding: 12px 24px;
   border: none;
@@ -169,10 +242,6 @@ button {
   font-size: 1rem;
   transition: all 0.3s ease;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-}
-
-.solicitacao-form button {
-    grid-column: 1 / -1; /* Botão ocupa a largura total */
 }
 
 button:hover:not(:disabled) {
@@ -187,20 +256,35 @@ button:disabled {
 }
 
 .logout-button {
-  background-color: rgba(255, 107, 107, 0.2);
+  background-color: #ff6b6b;
   border: 1px solid rgba(255, 107, 107, 0.3);
+  font-size: 0.9rem;
+  padding: 10px 16px;
 }
 .logout-button:hover {
-  background-color: rgba(255, 107, 107, 0.4);
+  background-color: #e74c3c;
+  box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
 }
 
 /* ============================================== */
-/* ===             TABELA                     === */
+/* ===             TABELA E FILTROS           === */
 /* ============================================== */
 
-.table-wrapper {
+.process-table-container {
+  padding: 2rem;
+  text-align: left;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.15);
   width: 100%;
   overflow-x: auto;
+}
+
+.process-table-container h2 {
+  margin-bottom: 1.5rem;
 }
 
 table {
@@ -211,7 +295,7 @@ table {
 }
 
 th, td {
-  padding: 15px;
+  padding: 12px 15px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   text-align: left;
   white-space: nowrap;
@@ -229,3 +313,146 @@ th {
 tbody tr:hover {
   background-color: rgba(91, 192, 222, 0.1);
 }
+
+.action-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 5px;
+  font-size: 1.2rem;
+  box-shadow: none;
+  color: #e0e0e0; /* Adicionado para garantir que o emoji seja visível */
+}
+.action-button:hover {
+  transform: none;
+  box-shadow: none;
+  opacity: 0.8;
+}
+
+/* Status Badges */
+.status {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: bold;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.status-pendente, .status-na, .status-aguardando-robo {
+  background-color: #f0ad4e;
+  color: #333;
+}
+.status-finalizado-com-sucesso, .status-efetivado-liquidado {
+  background-color: #2ecc71;
+  color: #333;
+}
+.status-erro, .status-cancelado {
+  background-color: #e74c3c;
+  color: #fff;
+}
+.status-em-processamento {
+  background-color: #3498db;
+  color: #fff;
+}
+.status-aguardando-confirmacao, .status-finalizado-confirmacao-realizada {
+  background-color: #9b59b6;
+  color: #fff;
+}
+/* Fallback genérico para status desconhecidos */
+.status-finalizado-status-nao-processavel, 
+.status-finalizado-valor-divergente,
+.status-devolvido,
+.status-indeferido {
+  background-color: #7f8c8d;
+  color: #fff;
+}
+
+
+/* ============================================== */
+/* ===          MODAL DE DETALHES             === */
+/* ============================================== */
+
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  backdrop-filter: blur(5px);
+}
+
+.modal-content {
+  background: #28374e;
+  padding: 2rem;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 700px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.modal-content h3 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  color: #5bc0de;
+  border-bottom: 1px solid #5bc0de;
+  padding-bottom: 0.5rem;
+}
+
+.modal-details {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  font-size: 1rem;
+}
+
+.modal-details p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.modal-details p strong {
+  color: #bdc3c7;
+  min-width: 160px;
+  display: inline-block;
+}
+
+.modal-details hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 0.5rem 0;
+}
+
+.comprovantes-list {
+  list-style-type: none;
+  padding-left: 0;
+  margin-top: 0.5rem;
+}
+.comprovantes-list li {
+  margin-bottom: 0.5rem;
+}
+.comprovantes-list a {
+  color: #5bc0de;
+  text-decoration: none;
+}
+.comprovantes-list a:hover {
+  text-decoration: underline;
+}
+
+.modal-close-button {
+  margin-top: 1.5rem;
+  float: right;
+  background-color: #7f8c8d;
+}
+.modal-close-button:hover {
+  background-color: #95a5a6;
+}
+
