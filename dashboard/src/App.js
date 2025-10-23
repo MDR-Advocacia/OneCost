@@ -1,24 +1,84 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { API_URL, login, getCurrentUser, getSolicitacoes, createSolicitacao, updateSolicitacao } from './api';
+// Importa TODAS as funções da API, incluindo as novas e a URL
+import {
+    API_URL,
+    login,
+    getCurrentUser,
+    getSolicitacoes,
+    createSolicitacao,
+    updateSolicitacao,
+    archiveSolicitation, // <-- Nova
+    resetarErrosSolicitacoes, // <-- Nova
+    createUser,         // <-- Nova
+    listUsers,          // <-- Nova
+    updateUserStatus    // <-- Nova
+} from './api';
 import './App.css';
 import logo from './assets/logo-onesid.png';
 import LoginPage from './LoginPage';
 
+// --- COMPONENTE AUXILIAR: Formatador de Data/Hora ---
+const formatDataHora = (dataString) => {
+    if (!dataString) return 'N/A';
+    try {
+        // Tenta criar Data assumindo UTC se 'Z' ou offset estiver presente, senão local
+        const data = new Date(dataString.endsWith('Z') || dataString.includes('+') || dataString.includes('T') ? dataString : dataString + 'Z');
+        if (isNaN(data.getTime())) {
+            // Fallback para strings de data simples (YYYY-MM-DD) interpretando como UTC
+            const parts = dataString.split('-');
+            if (parts.length === 3) {
+                 const dataOnly = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+                 if (!isNaN(dataOnly.getTime())) {
+                     return dataOnly.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+                 }
+            }
+            console.warn("Formato de data não reconhecido:", dataString);
+            return dataString; // Retorna original se não conseguir formatar
+        }
+        // Verifica se a string original parece ter hora
+        if (dataString.includes('T') || dataString.includes(' ')) {
+            return data.toLocaleString('pt-BR', {}); // Formato data e hora local
+        } else {
+            return data.toLocaleDateString('pt-BR', { timeZone: 'UTC' }); // Formato só data (considera UTC)
+        }
+    } catch (e) {
+         console.error("Erro formatando data:", dataString, e);
+        return dataString; // Retorna original em caso de erro
+    }
+};
+
+// --- COMPONENTE AUXILIAR: Formatador de Valor ---
+const formatValorDisplay = (valor) => {
+    if (valor === null || valor === undefined || valor === '') return 'N/A';
+    try {
+        // Tenta converter string (com ponto ou vírgula) para número
+        const num = typeof valor === 'string' ? parseFloat(valor.replace(',', '.')) : parseFloat(valor);
+        if (isNaN(num)) {
+            console.warn("Valor inválido para formatValorDisplay:", valor);
+            return 'Inválido'; // Retorna 'Inválido' se não for número após tentativa
+        }
+        // Formata como moeda brasileira
+        return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    } catch (e) {
+        console.error("Erro ao formatar valor:", valor, e);
+        return 'Erro'; // Retorna 'Erro' em caso de exceção na formatação
+    }
+};
+
+
 // --- COMPONENTE DO FORMULÁRIO (SolicitacaoForm) ---
 const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
-    // ... (estado existente: npj, numeroProcesso, etc.)
     const [npj, setNpj] = useState('');
     const [numeroProcesso, setNumeroProcesso] = useState('');
     const [numeroSolicitacao, setNumeroSolicitacao] = useState('');
-    const [valor, setValor] = useState('');
+    const [valor, setValor] = useState(''); // Manter como string para o input aceitar vírgula
     const [dataSolicitacao, setDataSolicitacao] = useState(new Date().toISOString().split('T')[0]);
-    // Este campo agora indica se o *usuário* marcou que precisa confirmação no portal
+    // NOVO NOME: Indica se o *usuário* marcou que precisa de confirmação no portal
     const [precisaConfirmacaoUsuario, setPrecisaConfirmacaoUsuario] = useState(true);
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [success, setSuccess] = useState('');
-
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -26,29 +86,41 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
         setError('');
         setSuccess('');
 
-        // Validação básica do valor (adicionado .trim())
-        const valorLimpo = valor.trim();
-        // Substitui vírgula por ponto para o parseFloat
-        const valorFloat = parseFloat(valorLimpo.replace(',', '.'));
+        // Validação básica do valor (aceita vírgula ou ponto, converte para número)
+        let valorFloat;
+        try {
+             const valorLimpo = valor.trim().replace(',', '.');
+             // Permite apenas dígitos, um ponto/vírgula opcional e até 2 casas decimais
+             if (!/^\d+([.,]\d{1,2})?$/.test(valor.trim()) || valorLimpo === '') {
+                 throw new Error("Formato de valor inválido. Use 1234.56 ou 1234,56.");
+             }
+             valorFloat = parseFloat(valorLimpo);
+             if (isNaN(valorFloat)) {
+                 throw new Error("Valor não é um número válido.");
+             }
+             // Verifica se o valor após conversão tem no máximo 2 casas decimais
+             if (Math.round(valorFloat * 100) / 100 !== valorFloat) {
+                  //throw new Error("Valor deve ter no máximo 2 casas decimais.");
+                  // Alternativamente, arredondar:
+                  valorFloat = Math.round(valorFloat * 100) / 100;
+                  console.warn("Valor arredondado para 2 casas decimais:", valorFloat);
+             }
 
-        // Verifica se é um número válido após a conversão
-        if (isNaN(valorFloat)) {
-            setError('Valor inválido. Use apenas números, ponto ou vírgula como separador decimal (ex: 1234.56 ou 1234,56).');
+        } catch (err) {
+            setError(err.message || 'Valor inválido.');
             setIsLoading(false);
             return;
         }
 
-        // <<< REMOVIDA a validação extra com regex aqui >>>
 
         try {
             const dados = {
-                npj,
-                numero_processo: numeroProcesso || null,
-                numero_solicitacao: numeroSolicitacao,
-                valor: valorFloat, // Envia como float para a API
+                npj: npj.trim(),
+                numero_processo: numeroProcesso.trim() || null,
+                numero_solicitacao: numeroSolicitacao.trim(),
+                valor: valorFloat, // Envia o número validado
                 data_solicitacao: dataSolicitacao,
-                // Mapeia para o nome esperado pela API/modelo
-                aguardando_confirmacao: precisaConfirmacaoUsuario
+                aguardando_confirmacao: precisaConfirmacaoUsuario // Nome do campo na API
             };
             await createSolicitacao(dados);
             setSuccess('Solicitação criada com sucesso!');
@@ -56,13 +128,23 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
             setNpj('');
             setNumeroProcesso('');
             setNumeroSolicitacao('');
-            setValor('');
+            setValor(''); // Limpa a string do valor
             setDataSolicitacao(new Date().toISOString().split('T')[0]);
-            setPrecisaConfirmacaoUsuario(true); // Reset para o default
-            setTimeout(() => setSuccess(''), 3000); // Limpa msg de sucesso
-            onSolicitacaoCriada(); // Atualiza a tabela
+            setPrecisaConfirmacaoUsuario(true);
+            setTimeout(() => setSuccess(''), 3000); // Limpa mensagem de sucesso
+            if(onSolicitacaoCriada) onSolicitacaoCriada(); // Atualiza a lista principal
         } catch (err) {
-            setError('Erro ao criar solicitação: ' + (err.response?.data?.detail || err.message || 'Verifique os dados'));
+             const detail = err.response?.data?.detail;
+             let message = 'Erro ao criar solicitação.';
+             if (typeof detail === 'string') {
+                 message += ` ${detail}`;
+             } else if (Array.isArray(detail)) {
+                 // Formata erros de validação do Pydantic/FastAPI
+                 message += ` ${detail.map(d => `${d.loc?.join('/') || 'campo'}: ${d.msg}`).join('; ')}`;
+             } else {
+                 message += ` ${err.message || 'Verifique os dados.'}`;
+             }
+            setError(message);
         } finally {
             setIsLoading(false);
         }
@@ -72,8 +154,7 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
         <div className="card">
             <h2>Adicionar Solicitação de Custa</h2>
             <form onSubmit={handleSubmit} className="solicitacao-form">
-                {/* ... (inputs existentes para NPJ, Numero Processo, Numero Solicitacao) ... */}
-                 <div className="form-group">
+                <div className="form-group">
                     <input id="npj" type="text" value={npj} onChange={(e) => setNpj(e.target.value)} placeholder="NPJ *" required />
                 </div>
                 <div className="form-group">
@@ -82,35 +163,31 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
                 <div className="form-group">
                     <input id="numeroSolicitacao" type="text" value={numeroSolicitacao} onChange={(e) => setNumeroSolicitacao(e.target.value)} placeholder="Número da Solicitação *" required />
                 </div>
-                <div className="form-group">
-                    {/* Input de valor com validação simples no frontend */}
+                 <div className="form-group">
+                    {/* Input aceita vírgula ou ponto */}
                     <input
                         id="valor"
-                        type="text" // Usar text para aceitar vírgula ou ponto
+                        type="text" // Mantido como text para flexibilidade
                         value={valor}
                         onChange={(e) => setValor(e.target.value)}
-                        placeholder="Valor (R$) *"
+                        placeholder="Valor (Ex: 1234,56) *"
                         required
-                        // REMOVIDO pattern para confiar na validação JS
-                        title="Use ponto ou vírgula como separador decimal (ex: 123.45 ou 123,45)"
-                    />
+                        inputMode="decimal" // Ajuda teclados mobile
+                     />
                 </div>
                 <div className="form-group">
+                    <label htmlFor="dataSolicitacao" style={{ fontSize: '0.8rem', marginBottom: '-0.2rem', color: '#ccc' }}>Data Solicitação:</label>
                     <input id="dataSolicitacao" type="date" value={dataSolicitacao} onChange={(e) => setDataSolicitacao(e.target.value)} required />
                 </div>
-                {/* Checkbox renomeado e com label mais claro */}
+                {/* Checkbox com novo nome e label */}
                 <div className="form-group-checkbox checkbox-container">
-                    <input
-                        id="precisaConfirmacaoUsuario"
-                        type="checkbox"
-                        checked={precisaConfirmacaoUsuario}
-                        onChange={(e) => setPrecisaConfirmacaoUsuario(e.target.checked)}
-                    />
-                    <label htmlFor="precisaConfirmacaoUsuario">Precisa de Confirmação no Portal BB?</label>
+                    <input id="precisaConfirmacaoUsuario" type="checkbox" checked={precisaConfirmacaoUsuario} onChange={(e) => setPrecisaConfirmacaoUsuario(e.target.checked)} />
+                    <label htmlFor="precisaConfirmacaoUsuario">Precisa de Confirmação no Portal?</label>
                 </div>
                 <button type="submit" disabled={isLoading}>
                     {isLoading ? 'Salvando...' : 'Salvar Solicitação'}
                 </button>
+                {/* Mensagens de erro/sucesso */}
                 {error && <p className="form-message error">{error}</p>}
                 {success && <p className="form-message success">{success}</p>}
             </form>
@@ -119,13 +196,14 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
 };
 
 
-// --- COMPONENTE DA TABELA (SolicitacoesTable) ---
-const SolicitacoesTable = ({ solicitacoes, onDataRefresh, currentUser }) => { // Recebe currentUser
-    // ... (estado existente) ...
+// --- COMPONENTE DA TABELA DE SOLICITAÇÕES ---
+// Recebe currentUser para verificar permissões
+const SolicitacoesTable = ({ solicitacoes, currentUser, onDataRefresh }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedSolicitacao, setSelectedSolicitacao] = useState(null);
-    const [isModalLoading, setIsModalLoading] = useState(false); // Para ações do modal
+    const [isModalLoading, setIsModalLoading] = useState(false);
     const [modalError, setModalError] = useState('');
+    const isAdmin = currentUser?.role === 'admin'; // Verifica se é admin
 
     const openModal = (solicitacao) => {
         setSelectedSolicitacao(solicitacao);
@@ -139,48 +217,22 @@ const SolicitacoesTable = ({ solicitacoes, onDataRefresh, currentUser }) => { //
         setSelectedSolicitacao(null);
     };
 
-    // Formata data/hora ou só data
-    const formatData = (dataString) => {
-        // ... (código existente sem alterações) ...
-        if (!dataString) return 'N/A';
-        try {
-            const dataUTC = new Date(dataString.endsWith('Z') || dataString.includes('+') ? dataString : dataString + 'Z');
-            if (isNaN(dataUTC.getTime())) {
-                const parts = dataString.split('-');
-                if (parts.length === 3) {
-                    const dataOnly = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
-                     if (!isNaN(dataOnly.getTime())) {
-                         return dataOnly.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
-                     }
-                }
-                return dataString;
-            }
-            if (dataString.includes('T') || dataString.includes(' ')) {
-                return dataUTC.toLocaleString('pt-BR', {});
-            } else {
-                return dataUTC.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
-            }
-        } catch (e) {
-             console.error("Erro formatando data:", dataString, e);
-            return dataString;
-        }
-    };
-
-    // Formata links de comprovantes
+    // Função para formatar lista de comprovantes como links
     const formatComprovantes = (paths) => {
-        // ... (código existente sem alterações) ...
-        if (!paths) return <li>Nenhum</li>;
+        if (!paths || paths.length === 0) return <li>Nenhum</li>;
         let links = [];
         try {
-            if (Array.isArray(paths)) { links = paths; }
-            else if (typeof paths === 'string' && paths.startsWith('[')) { links = JSON.parse(paths); }
+            // Garante que 'paths' seja um array de strings
+            if (Array.isArray(paths)) { links = paths.map(String); }
+            else if (typeof paths === 'string' && paths.startsWith('[')) { links = JSON.parse(paths).map(String); }
             else if (typeof paths === 'string' && paths.trim() !== '') { links = [paths]; }
         } catch (e) { console.error("Erro ao parsear comprovantes_path:", paths, e); return <li>Erro ao ler caminhos</li>; }
 
         if (!Array.isArray(links) || links.length === 0) return <li>Nenhum</li>;
 
         return links.map((link, index) => {
-            const nomeArquivo = link.split(/[\\/]/).pop() || `Comprovante_${index + 1}`;
+            const nomeArquivo = link.split(/[\\/]/).pop() || `Arquivo ${index + 1}`;
+            // Constrói a URL completa para o backend servir o arquivo
             const staticPath = "static/comprovantes";
             const downloadUrl = `${API_URL.replace(/\/$/, '')}/${staticPath}/${link.replace(/^\//, '')}`;
 
@@ -194,32 +246,33 @@ const SolicitacoesTable = ({ solicitacoes, onDataRefresh, currentUser }) => { //
         });
     };
 
-    // Define classe CSS com base no status do robô
+    // Define a classe CSS para o indicador de status do robô
      const getRoboStatusClass = (statusRobo) => {
-        // ... (código existente sem alterações) ...
         const s = (statusRobo || 'pendente').toLowerCase();
         if (s.includes('erro')) { return 'erro'; }
         if (s.includes('finalizado')) { return 'finalizado'; }
-        if (s.includes('tratado')) { return 'finalizado'; } // Trata status customizado
-        return 'pendente';
+        return 'pendente'; // Pendente, Aguardando, etc.
     };
 
-    // Handler para o botão "Resetar para Pendente"
+    // Função para resetar para Pendente (botão no modal)
     const handleResetPendente = async () => {
-        // ... (código existente sem alterações) ...
-        if (!selectedSolicitacao) return;
+        if (!selectedSolicitacao || isModalLoading) return;
         setIsModalLoading(true);
         setModalError('');
+        console.log(`[SolicitacoesTable] Resetando solicitação ID ${selectedSolicitacao.id} para Pendente...`);
         try {
             await updateSolicitacao(selectedSolicitacao.id, {
                 status_robo: "Pendente",
-                status_portal: null,
-                ultima_verificacao_robo: null,
-                usuario_confirmacao_id: null,
-                usuario_finalizacao_id: null,
-                data_finalizacao: null
+                status_portal: null, // Limpa status do portal
+                ultima_verificacao_robo: null, // Limpa última verificação
+                usuario_confirmacao_id: null, // Limpa confirmação se houve
+                // Não mexe em finalização ou arquivamento aqui
             });
-            if (onDataRefresh) { onDataRefresh(); }
+             if (onDataRefresh) {
+                 // Passa o estado atual de showArchived para onDataRefresh
+                 const showArchivedCheckbox = document.getElementById('showArchived');
+                 onDataRefresh(showArchivedCheckbox ? showArchivedCheckbox.checked : false);
+             }
             closeModal();
         } catch (err) {
             console.error("Erro ao resetar solicitação:", err);
@@ -229,40 +282,52 @@ const SolicitacoesTable = ({ solicitacoes, onDataRefresh, currentUser }) => { //
         }
     };
 
-    // Handler para o botão "Marcar como Finalizado/Tratado"
+    // NOVO: Função para Marcar como Finalizado/Tratado (botão no modal)
     const handleFinalizarTratamento = async () => {
-        // ... (código existente sem alterações) ...
-        if (!selectedSolicitacao || !currentUser) return;
+        if (!selectedSolicitacao || isModalLoading || selectedSolicitacao.usuario_finalizacao_id) return;
         setIsModalLoading(true);
         setModalError('');
+        console.log(`[SolicitacoesTable] Marcando solicitação ID ${selectedSolicitacao.id} como finalizada...`);
         try {
+            // Envia a flag 'finalizar: true' para o backend
             await updateSolicitacao(selectedSolicitacao.id, {
                 finalizar: true
             });
-            if (onDataRefresh) { onDataRefresh(); }
-            closeModal();
+             if (onDataRefresh) {
+                 const showArchivedCheckbox = document.getElementById('showArchived');
+                 onDataRefresh(showArchivedCheckbox ? showArchivedCheckbox.checked : false);
+             }
+            closeModal(); // Fecha o modal após sucesso
         } catch (err) {
-            console.error("Erro ao marcar como finalizado:", err);
+             console.error("Erro ao marcar como finalizado:", err);
             setModalError('Falha ao finalizar: ' + (err.response?.data?.detail || err.message));
         } finally {
-            setIsModalLoading(false);
+             setIsModalLoading(false);
         }
     };
 
-    // Determina se o botão de finalizar deve ser mostrado
-    const mostrarBotaoFinalizar = selectedSolicitacao?.status_robo?.toLowerCase().includes('finalizado')
-                               && !selectedSolicitacao?.usuario_finalizacao_id;
-
-    // Função auxiliar para formatar o valor na tabela e no modal
-    const formatValorDisplay = (valor) => {
-        // Tenta converter para número, tratando string ou número
-        const num = parseFloat(valor);
-        if (!isNaN(num)) {
-            return num.toFixed(2).replace('.', ','); // Formata com vírgula para pt-BR
+    // NOVO: Função para Arquivar/Desarquivar (Admin - botão no modal)
+    const handleToggleArchive = async () => {
+        if (!selectedSolicitacao || isModalLoading || !isAdmin) return;
+        const newArchiveStatus = !selectedSolicitacao.is_archived;
+        setIsModalLoading(true);
+        setModalError('');
+        console.log(`[SolicitacoesTable] Admin ${currentUser.username} ${newArchiveStatus ? 'arquivando' : 'desarquivando'} solicitação ID ${selectedSolicitacao.id}...`);
+        try {
+            // A API espera { "is_archived": true/false }
+            await archiveSolicitation(selectedSolicitacao.id, newArchiveStatus);
+             if (onDataRefresh) {
+                 // Ao arquivar/desarquivar, recarrega a lista respeitando o filtro atual
+                 const showArchivedCheckbox = document.getElementById('showArchived');
+                 onDataRefresh(showArchivedCheckbox ? showArchivedCheckbox.checked : false);
+            }
+            closeModal(); // Fecha o modal
+        } catch (err) {
+            console.error("Erro ao arquivar/desarquivar:", err);
+            setModalError('Falha ao arquivar/desarquivar: ' + (err.response?.data?.detail || err.message));
+        } finally {
+            setIsModalLoading(false);
         }
-        // Se a conversão falhar (ou for null/undefined), retorna 'Inválido'
-        console.warn("Valor inválido recebido:", valor);
-        return 'Inválido';
     };
 
 
@@ -275,10 +340,10 @@ const SolicitacoesTable = ({ solicitacoes, onDataRefresh, currentUser }) => { //
                         <tr>
                             <th>NPJ</th>
                             <th>Nº Solicitação</th>
-                            <th>Valor (R$)</th>
+                            <th>Valor</th>
                             <th>Data Solicitação</th>
                             <th>Criado Por</th>
-                            <th>Status</th>
+                            <th>Status Robô/Portal</th> {/* Coluna de Status Atualizada */}
                             <th>Ações</th>
                         </tr>
                     </thead>
@@ -286,35 +351,42 @@ const SolicitacoesTable = ({ solicitacoes, onDataRefresh, currentUser }) => { //
                         {solicitacoes.length > 0 ? (
                             solicitacoes.map(item => {
                                 const statusRoboClasse = getRoboStatusClass(item.status_robo);
-                                // Prioriza status do portal, senão do robô, senão 'Pendente'
+                                // Prioriza Status Portal, senão Robô, senão 'Pendente'
                                 let statusText = item.status_portal || item.status_robo || 'Pendente';
-                                // Se já foi finalizado pelo usuário, mostra isso
-                                if(item.usuario_finalizacao_id) {
-                                    statusText = `Tratado por ${item.usuario_finalizacao?.username || 'usuário'}`;
+                                // NOVO: Adiciona "(Tratado por ...)" se finalizado pelo usuário
+                                if(item.usuario_finalizacao) {
+                                    statusText += ` (Tratado por ${item.usuario_finalizacao.username})`;
+                                }
+                                // NOVO: Adiciona "(Arquivado)" se estiver arquivado
+                                if(item.is_archived) {
+                                    statusText = `(Arquivado)`; // Sobrescreve outros status se arquivado
                                 }
 
-
                                 return (
-                                    <tr key={item.id}>
+                                    <tr key={item.id} className={item.is_archived ? 'archived-row' : ''}>
                                         <td>{item.npj}</td>
                                         <td>{item.numero_solicitacao}</td>
-                                        {/* USA A NOVA FUNÇÃO DE FORMATAÇÃO */}
+                                        {/* Usa a função formatValorDisplay */}
                                         <td>{formatValorDisplay(item.valor)}</td>
-                                        <td>{formatData(item.data_solicitacao)}</td>
-                                        {/* Exibe quem criou */}
+                                        <td>{formatDataHora(item.data_solicitacao)}</td>
+                                        {/* Agora usa usuario_criacao */}
                                         <td>{item.usuario_criacao?.username || 'Desconhecido'}</td>
                                         <td>
+                                          {/* Status combinado (indicador + texto) */}
                                           <div className="status-cell">
-                                            <span
-                                              className={`status-indicator status-${statusRoboClasse}`}
-                                              title={`Status Robô: ${item.status_robo || 'Pendente'}`}
-                                            ></span>
+                                            {!item.is_archived && ( /* Só mostra bolinha se não arquivado */
+                                                <span
+                                                  className={`status-indicator status-${statusRoboClasse}`}
+                                                  title={`Status Robô: ${item.status_robo || 'Pendente'}\nStatus Portal: ${item.status_portal || 'N/A'}`}
+                                                ></span>
+                                             )}
                                             <span className="status-text">
                                               {statusText}
                                             </span>
                                           </div>
                                         </td>
                                         <td>
+                                            {/* Botão para abrir o modal */}
                                             <button onClick={() => openModal(item)} className="action-button" title="Ver Detalhes e Ações">
                                                 👁️
                                             </button>
@@ -322,70 +394,78 @@ const SolicitacoesTable = ({ solicitacoes, onDataRefresh, currentUser }) => { //
                                     </tr>
                                 );
                             })
-                        ) : ( <tr><td colSpan="7">Nenhuma solicitação cadastrada ainda.</td></tr> )}
+                        ) : ( <tr><td colSpan="7">Nenhuma solicitação encontrada.</td></tr> )}
                     </tbody>
                 </table>
              </div>
 
-            {/* Modal (Renderizado via Portal) */}
+            {/* Modal de Detalhes (Renderizado via Portal) */}
              {isModalOpen && selectedSolicitacao && createPortal(
                 <div className="modal-backdrop" onClick={closeModal}>
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
                         <h3>Detalhes da Solicitação (ID: {selectedSolicitacao.id})</h3>
                         <div className="modal-details">
-                            {/* Informações básicas */}
+                            <p><strong>Status Atual:</strong> {selectedSolicitacao.is_archived ? '(Arquivado)' : (selectedSolicitacao.status_portal || selectedSolicitacao.status_robo || 'Pendente')} </p>
+                            <hr />
                             <p><strong>NPJ:</strong> {selectedSolicitacao.npj}</p>
                             <p><strong>Nº Processo:</strong> {selectedSolicitacao.numero_processo || 'N/A'}</p>
-                            <p><strong>Nº Solicitação:</strong> {selectedSolicitacao.numero_solicitacao}</p>
-                            {/* USA A NOVA FUNÇÃO DE FORMATAÇÃO */}
-                            <p><strong>Valor:</strong> R$ {formatValorDisplay(selectedSolicitacao.valor)}</p>
-                            <p><strong>Data da Solicitação:</strong> {formatData(selectedSolicitacao.data_solicitacao)}</p>
-                            {/* Alteração do texto conforme solicitado */}
+                            <p><strong>Nº Solicitação Portal:</strong> {selectedSolicitacao.numero_solicitacao}</p>
+                            <p><strong>Valor:</strong> {formatValorDisplay(selectedSolicitacao.valor)}</p>
+                            <p><strong>Data da Solicitação (Portal):</strong> {formatDataHora(selectedSolicitacao.data_solicitacao)}</p>
                             <p><strong>Confirmação Solicitada (Usuário):</strong> {selectedSolicitacao.aguardando_confirmacao ? 'Sim' : 'Não'}</p>
-
                             <hr />
-                            {/* Informações de Status */}
-                            <p><strong>Status Portal BB:</strong> {selectedSolicitacao.status_portal || 'N/A'}</p>
-                            <p><strong>Status Robô:</strong> {selectedSolicitacao.status_robo || 'Pendente'}</p>
-                            <p><strong>Última Verificação Robô:</strong> {formatData(selectedSolicitacao.ultima_verificacao_robo)}</p>
-
-                            <hr />
-                            {/* Informações de Rastreabilidade */}
                             <p><strong>Criado por:</strong> {selectedSolicitacao.usuario_criacao?.username || 'Desconhecido'}</p>
                             <p><strong>Confirmado (Robô) por:</strong> {selectedSolicitacao.usuario_confirmacao?.username || 'N/A'}</p>
-                            <p><strong>Finalizado por:</strong> {selectedSolicitacao.usuario_finalizacao?.username || 'N/A'}</p>
-                            <p><strong>Data Finalização:</strong> {formatData(selectedSolicitacao.data_finalizacao)}</p>
-
-
+                            <p><strong>Finalizado/Tratado por:</strong> {selectedSolicitacao.usuario_finalizacao?.username || 'Não'} {selectedSolicitacao.data_finalizacao ? `em ${formatDataHora(selectedSolicitacao.data_finalizacao)}` : ''}</p>
+                            <p><strong>Arquivado por:</strong> {selectedSolicitacao.usuario_arquivamento?.username || 'Não'} {selectedSolicitacao.data_arquivamento ? `em ${formatDataHora(selectedSolicitacao.data_arquivamento)}` : ''}</p>
                             <hr />
-                            {/* Comprovantes */}
+                            <p><strong>Status Robô:</strong> {selectedSolicitacao.status_robo || 'Pendente'}</p>
+                            <p><strong>Status Portal (último visto):</strong> {selectedSolicitacao.status_portal || 'N/A'}</p>
+                            <p><strong>Última Verificação Robô:</strong> {formatDataHora(selectedSolicitacao.ultima_verificacao_robo)}</p>
+                            <hr />
                             <p><strong>Comprovantes/Documentos:</strong></p>
                             <ul className="comprovantes-list">{formatComprovantes(selectedSolicitacao.comprovantes_path)}</ul>
                         </div>
-
-                        {/* Ações do Modal */}
+                        {/* Ações no Modal */}
                         <div className="modal-actions">
-                            {modalError && <p className="form-message error">{modalError}</p>}
+                             {/* Mensagem de erro específica do modal */}
+                            {modalError && <p className="form-message error" style={{ flexGrow: 1, textAlign: 'left' }}>{modalError}</p>}
 
-                            {/* Botão Resetar */}
-                            <button
-                                onClick={handleResetPendente}
-                                className="modal-button-reset"
-                                disabled={isModalLoading}
-                            >
-                                {isModalLoading ? "Processando..." : "Resetar para Pendente"}
-                            </button>
-
-                            {/* NOVO: Botão Finalizar */}
-                            {mostrarBotaoFinalizar && (
+                            {/* Botão Resetar para Pendente (SÓ SE NÃO ARQUIVADO) */}
+                            {!selectedSolicitacao.is_archived && (
                                 <button
-                                    onClick={handleFinalizarTratamento}
-                                    className="modal-button-finalizar" // Adicionar estilo se necessário
+                                    onClick={handleResetPendente}
+                                    className="modal-button-reset"
                                     disabled={isModalLoading}
+                                    title={"Força o robô a verificar novamente"}
                                 >
-                                    {isModalLoading ? "Processando..." : "Marcar como Finalizado/Tratado"}
+                                    {isModalLoading ? "Resetando..." : "Resetar para Pendente"}
                                 </button>
                             )}
+
+                            {/* Botão Marcar como Finalizado/Tratado (SÓ SE NÃO ARQUIVADO e se aplicável)*/}
+                            {!selectedSolicitacao.is_archived && selectedSolicitacao.status_robo?.toLowerCase().includes('finalizado') && !selectedSolicitacao.usuario_finalizacao_id && (
+                                <button
+                                    onClick={handleFinalizarTratamento}
+                                    className="modal-button-finalize"
+                                    disabled={isModalLoading}
+                                    title="Marcar que os documentos foram tratados/inseridos no sistema externo"
+                                >
+                                    {isModalLoading ? 'Finalizando...' : 'Marcar como Tratado'}
+                                </button>
+                            )}
+
+                             {/* Botão Arquivar/Desarquivar (Admin) */}
+                             {isAdmin && (
+                                <button
+                                    onClick={handleToggleArchive}
+                                    className={`modal-button-archive ${selectedSolicitacao.is_archived ? 'secondary' : 'warning'}`}
+                                    disabled={isModalLoading}
+                                    title={selectedSolicitacao.is_archived ? "Retorna a solicitação para a lista ativa" : "Remove a solicitação da lista principal"}
+                                >
+                                    {isModalLoading ? (selectedSolicitacao.is_archived ? 'Desarquivando...' : 'Arquivando...') : (selectedSolicitacao.is_archived ? 'Desarquivar' : 'Arquivar')}
+                                </button>
+                             )}
 
                             {/* Botão Fechar */}
                             <button onClick={closeModal} className="modal-close-button" disabled={isModalLoading}>
@@ -394,8 +474,265 @@ const SolicitacoesTable = ({ solicitacoes, onDataRefresh, currentUser }) => { //
                         </div>
                     </div>
                 </div>,
-                document.getElementById('modal-root') // Garante que o portal exista no index.html
+                document.getElementById('modal-root') // Renderiza no portal do modal
             )}
+        </div>
+    );
+};
+
+
+// --- NOVO: COMPONENTE DO FORMULÁRIO DE CRIAÇÃO DE USUÁRIO (Admin) ---
+const UserCreateForm = ({ onUserCreated }) => {
+    const [username, setUsername] = useState('');
+    const [password, setPassword] = useState('');
+    const [role, setRole] = useState('user'); // Default 'user'
+    const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [success, setSuccess] = useState('');
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!username.trim() || !password.trim()) {
+            setError('Usuário e senha são obrigatórios.');
+            return;
+        }
+        setIsLoading(true);
+        setError('');
+        setSuccess('');
+
+        try {
+            await createUser({ username: username.trim(), password, role });
+            setSuccess(`Usuário '${username.trim()}' criado com sucesso!`);
+            setUsername('');
+            setPassword('');
+            setRole('user');
+            setTimeout(() => setSuccess(''), 4000);
+            if(onUserCreated) onUserCreated(); // Avisa o painel admin para recarregar a lista
+        } catch (err) {
+             const message = err.response?.data?.detail || err.message || 'Erro desconhecido.';
+            setError(`Erro ao criar usuário: ${message}`);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <form onSubmit={handleSubmit} className="user-create-form" style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', marginBottom: '1rem', flexWrap: 'wrap' }}>
+            <div className="form-group" style={{ flexGrow: 1, minWidth: '150px' }}>
+                <label htmlFor="newUsername">Novo Usuário:</label>
+                <input id="newUsername" type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Nome de usuário" required />
+            </div>
+            <div className="form-group" style={{ flexGrow: 1, minWidth: '150px' }}>
+                <label htmlFor="newPassword">Senha:</label>
+                <input id="newPassword" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha" required />
+            </div>
+            <div className="form-group">
+                <label htmlFor="newRole">Permissão:</label>
+                <select id="newRole" value={role} onChange={(e) => setRole(e.target.value)} required>
+                    <option value="user">Usuário</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <button type="submit" disabled={isLoading} style={{ padding: '10px 15px', height: '44px' }}>
+                {isLoading ? 'Criando...' : 'Criar Usuário'}
+            </button>
+            {error && <p className="form-message error" style={{ width: '100%', margin: '0.5rem 0 0 0' }}>{error}</p>}
+            {success && <p className="form-message success" style={{ width: '100%', margin: '0.5rem 0 0 0' }}>{success}</p>}
+        </form>
+    );
+};
+
+// --- NOVO: COMPONENTE DA TABELA DE GERENCIAMENTO DE USUÁRIOS (Admin) ---
+const UserListTable = ({ users: initialUsers = [], currentUser, onUserListChanged }) => {
+    const [users, setUsers] = useState(initialUsers);
+    const [loadingStates, setLoadingStates] = useState({}); // { userId: boolean }
+    const [error, setError] = useState('');
+
+    // Atualiza a lista local se a prop mudar
+    useEffect(() => {
+        setUsers(initialUsers);
+    }, [initialUsers]);
+
+    const handleToggleActive = async (userToUpdate) => {
+        // Impede admin de desativar a si mesmo ou o usuário 'admin' principal
+        if ((userToUpdate.id === currentUser.id || userToUpdate.username === 'admin') && !userToUpdate.is_active === false) {
+             setError("Não é possível desativar a si mesmo ou o usuário 'admin'.");
+             setTimeout(() => setError(''), 4000);
+             return;
+        }
+
+
+        const newStatus = !userToUpdate.is_active;
+        setLoadingStates(prev => ({ ...prev, [userToUpdate.id]: true }));
+        setError('');
+
+        try {
+            await updateUserStatus(userToUpdate.id, newStatus);
+            // Atualiza a lista localmente para refletir a mudança imediatamente
+            setUsers(prevUsers => prevUsers.map(u =>
+                u.id === userToUpdate.id ? { ...u, is_active: newStatus } : u
+            ));
+            // Opcional: Chamar onUserListChanged() se precisar recarregar do backend
+            // if(onUserListChanged) onUserListChanged();
+        } catch (err) {
+            setError(`Erro ao ${newStatus ? 'ativar' : 'desativar'} usuário: ${err.response?.data?.detail || err.message}`);
+        } finally {
+            setLoadingStates(prev => ({ ...prev, [userToUpdate.id]: false }));
+        }
+    };
+
+    return (
+        <div className="user-list-container">
+            <h3>Usuários Cadastrados</h3>
+            {error && <p className="form-message error">{error}</p>}
+            <div className="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Username</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {users.length > 0 ? (
+                            users.map(user => {
+                                const isLoading = loadingStates[user.id];
+                                // Condição para desabilitar o botão
+                                const isDisabled = isLoading || ((user.id === currentUser.id || user.username === 'admin') && user.is_active);
+
+                                return (
+                                    <tr key={user.id}>
+                                        <td>{user.id}</td>
+                                        <td>{user.username}</td>
+                                        <td>{user.role}</td>
+                                        <td>{user.is_active ? 'Ativo' : 'Inativo'}</td>
+                                        <td>
+                                            <button
+                                                onClick={() => handleToggleActive(user)}
+                                                disabled={isDisabled}
+                                                className={user.is_active ? 'button-deactivate' : 'button-activate'} // Adicionar estilos CSS
+                                                title={isDisabled ? "Não pode alterar status" : (user.is_active ? 'Desativar usuário' : 'Ativar usuário')}
+                                            >
+                                                {isLoading ? '...' : (user.is_active ? 'Desativar' : 'Ativar')}
+                                            </button>
+                                        </td>
+                                    </tr>
+                                );
+                            })
+                        ) : (
+                            <tr><td colSpan="5">Nenhum usuário encontrado (além de você).</td></tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+
+// --- NOVO: COMPONENTE DO PAINEL DE ADMINISTRAÇÃO ---
+const AdminPanel = ({ currentUser, onDataRefresh }) => {
+    const [users, setUsers] = useState([]);
+    const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+    const [userListError, setUserListError] = useState('');
+    const [showArchived, setShowArchived] = useState(false); // Estado para ver arquivados
+    const [isResettingErrors, setIsResettingErrors] = useState(false);
+    const [resetError, setResetError] = useState('');
+    const [resetSuccess, setResetSuccess] = useState('');
+
+    const fetchUsers = useCallback(async () => {
+        setIsLoadingUsers(true);
+        setUserListError('');
+        try {
+            const userList = await listUsers();
+            setUsers(userList);
+        } catch (err) {
+            setUserListError('Erro ao carregar lista de usuários: ' + (err.response?.data?.detail || err.message));
+        } finally {
+            setIsLoadingUsers(false);
+        }
+    }, []); // useCallback para evitar recriação desnecessária
+
+    // Carrega usuários ao montar o painel
+    useEffect(() => {
+        fetchUsers();
+    }, [fetchUsers]);
+
+    // Função para recarregar a lista de usuários (chamada pelo UserCreateForm)
+    const handleUserListChanged = () => {
+        fetchUsers();
+    };
+
+     // Função para o botão de resetar erros
+     const handleResetErrors = async () => {
+        setIsResettingErrors(true);
+        setResetError('');
+        setResetSuccess('');
+        try {
+            const result = await resetarErrosSolicitacoes();
+            setResetSuccess(result.message || 'Status de erro resetados com sucesso.');
+            if(onDataRefresh) onDataRefresh(showArchived); // Atualiza lista de solicitações
+            setTimeout(() => setResetSuccess(''), 5000);
+        } catch (err) {
+             setResetError('Erro ao resetar status: ' + (err.response?.data?.detail || err.message));
+        } finally {
+            setIsResettingErrors(false);
+        }
+    };
+
+    // Callback para o checkbox de arquivados
+    const handleShowArchivedChange = (e) => {
+        const checked = e.target.checked;
+        setShowArchived(checked);
+        if(onDataRefresh) onDataRefresh(checked); // Pede para App.js recarregar com o novo filtro
+    };
+
+
+    return (
+        <div className="card admin-panel">
+            <h2>Painel Administrativo</h2>
+
+            {/* Gerenciamento de Usuários */}
+            <section className="admin-section">
+                <UserCreateForm onUserCreated={handleUserListChanged} />
+                {userListError && <p className="form-message error">{userListError}</p>}
+                {isLoadingUsers ? <p>Carregando usuários...</p> : (
+                    <UserListTable users={users} currentUser={currentUser} onUserListChanged={handleUserListChanged} />
+                )}
+            </section>
+
+             <hr style={{ margin: '2rem 0', borderColor: 'rgba(255,255,255,0.1)' }}/>
+
+             {/* Outras Ações Admin */}
+            <section className="admin-section">
+                <h3>Ações Gerais</h3>
+                 {/* Checkbox para ver arquivados */}
+                 <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center' }}>
+                    <input
+                        type="checkbox"
+                        id="showArchived"
+                        checked={showArchived}
+                        onChange={handleShowArchivedChange}
+                        style={{ marginRight: '0.5rem', width: 'auto' }}
+                    />
+                    <label htmlFor="showArchived"> Exibir solicitações arquivadas</label>
+                </div>
+
+                 {/* Botão para Resetar Erros */}
+                <button
+                    onClick={handleResetErrors}
+                    disabled={isResettingErrors}
+                    className="button-reset-errors" // Adicionar estilo se necessário
+                    style={{ backgroundColor: '#f0ad4e', color: '#111' }}
+                 >
+                     {isResettingErrors ? 'Resetando...' : 'Resetar Status de Erro'}
+                </button>
+                {resetError && <p className="form-message error" style={{marginTop: '0.5rem'}}>{resetError}</p>}
+                {resetSuccess && <p className="form-message success" style={{marginTop: '0.5rem'}}>{resetSuccess}</p>}
+            </section>
         </div>
     );
 };
@@ -403,107 +740,147 @@ const SolicitacoesTable = ({ solicitacoes, onDataRefresh, currentUser }) => { //
 
 // --- COMPONENTE PRINCIPAL DA APLICAÇÃO ---
 function App() {
-    // ... (código existente do App sem alterações) ...
     const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [isLoading, setIsLoading] = useState(true);
-    const [currentUser, setCurrentUser] = useState(null);
+    const [isLoading, setIsLoading] = useState(true); // Controla o carregamento inicial
+    const [currentUser, setCurrentUser] = useState(null); // Armazena dados do usuário logado
     const [solicitacoes, setSolicitacoes] = useState([]);
-    const [error, setError] = useState('');
+    const [error, setError] = useState(''); // Erro global da aplicação
 
-    const fetchData = async () => {
-        console.log("Chamando fetchData...");
-        setIsLoading(true); // Garante loading ao buscar
+    // Função para buscar dados do usuário e solicitações
+    // useCallback para evitar recriações desnecessárias, aceita 'includeArchived'
+    const fetchData = useCallback(async (includeArchived = false) => {
+        console.log(`[App] Chamando fetchData... includeArchived=${includeArchived}`);
+        setError(''); // Limpa erros antigos
+        let userToUse = currentUser; // Usa o estado atual como base
+
         try {
-            const userResponse = await getCurrentUser();
-            console.log("Dados do usuário recebidos:", userResponse);
-            setCurrentUser(userResponse); // Armazena dados do usuário logado
+            // Se não temos usuário no estado, busca
+            if (!userToUse) {
+                console.log("[App] Buscando dados do usuário...");
+                userToUse = await getCurrentUser();
+                setCurrentUser(userToUse); // Atualiza o estado
+            } else {
+                 console.log("[App] Usando dados do usuário do estado:", userToUse);
+            }
 
-            const solicitacoesResponse = await getSolicitacoes();
-            console.log("Solicitações recebidas:", solicitacoesResponse);
-            // Ordena por ID decrescente (mais recentes primeiro)
+            console.log("[App] Buscando solicitações...");
+            const solicitacoesResponse = await getSolicitacoes(includeArchived);
+            console.log("[App] Solicitações recebidas:", solicitacoesResponse);
+            // Ordena por ID decrescente
             setSolicitacoes(solicitacoesResponse.sort((a, b) => b.id - a.id));
-            setIsLoggedIn(true);
-            setError(''); // Limpa erro anterior
+            setIsLoggedIn(true); // Confirma que está logado
         } catch (err) {
-             console.error("Erro detalhado em fetchData:", err);
-            let detailedError = err.message || 'Verifique a conexão';
-            if (err.response) {
-                detailedError = `Erro ${err.response.status}: ${err.response.data?.detail || err.message}`;
-                 if (err.response.status === 401) {
-                     handleLogout(); // Desloga se token for inválido
-                     detailedError = "Sessão expirada. Faça login novamente.";
-                 }
-            } else if (err.request) { detailedError = "Sem resposta do servidor."; }
-             setError('Erro ao buscar dados: ' + detailedError);
-             // Se não há token, garante estado de deslogado
-             if (!localStorage.getItem('token')) {
-                 setIsLoggedIn(false);
-                 setCurrentUser(null);
+             console.error("[App] Erro detalhado em fetchData:", err);
+             let detailedError = err.message || 'Verifique a conexão';
+             if (err.response) {
+                 detailedError = `Erro ${err.response.status}: ${err.response.data?.detail || err.message}`;
+                 // O interceptor já trata o 401 para deslogar
+             } else if (err.request) {
+                 detailedError = "Sem resposta do servidor.";
              }
-        } finally { setIsLoading(false); }
-    };
-
-    // Efeito para verificar login inicial
-    useEffect(() => {
-        console.log("Verificando token no carregamento...");
-        const token = localStorage.getItem('token');
-        if (token) {
-            console.log("Token encontrado. Buscando dados...");
-            fetchData(); // Busca dados se houver token
+             setError('Erro ao buscar dados: ' + detailedError);
+             // Se o erro não for 401, mas não temos token, desloga preventivamente
+             if (!localStorage.getItem('token') && err.response?.status !== 401) {
+                 handleLogout(); // Chama a função de logout definida abaixo
+             }
+        } finally {
+             // Garante que o estado de carregamento seja desativado
+             setIsLoading(false);
         }
-        else {
-            console.log("Nenhum token. Indo para login.");
-            setIsLoading(false); // Para de carregar se não houver token
-            setIsLoggedIn(false); // Garante estado de deslogado
-        }
-    }, []); // Executa apenas uma vez no mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentUser]); // Recria fetchData SÓ se currentUser mudar
 
-    // Handler para sucesso no login
-    const handleLoginSuccess = (loginData) => {
-        console.log("Login OK, buscando dados pós-login...");
-        fetchData(); // Busca dados após login bem-sucedido
-    };
-
-    // Handler para logout
-    const handleLogout = () => {
-        console.log("Executando logout...");
+     // Função de Logout - precisa ser definida antes de ser usada no useCallback
+     const handleLogout = useCallback(() => {
+        console.log("[App] Executando logout...");
         localStorage.removeItem('token');
         setIsLoggedIn(false);
         setCurrentUser(null);
         setSolicitacoes([]);
         setError('');
-        setIsLoading(false); // Para de carregar, se estiver
-    };
+        setIsLoading(false); // Garante que não fique carregando
+    }, []); // useCallback sem dependências
 
-    // Handler para quando dados precisam ser atualizados (ex: após criar solicitação)
-    const handleDataNeedsRefresh = () => {
-        console.log("Solicitação de atualização de dados recebida, buscando...");
-        fetchData(); // Rebusca todos os dados
-    };
 
-    // Tela de carregamento
-    if (isLoading) { return <div className="loading-screen">Carregando...</div>; }
+    // Efeito para verificar o token e buscar dados iniciais
+    useEffect(() => {
+        console.log("[App useEffect] Verificando token...");
+        const token = localStorage.getItem('token');
+        if (token) {
+            console.log("[App useEffect] Token encontrado. Buscando dados iniciais...");
+            setIsLoading(true); // Ativa o loading ANTES de chamar fetchData
+            fetchData(false); // Busca inicial sem arquivados
+        } else {
+            console.log("[App useEffect] Nenhum token. Indo para login.");
+            setIsLoading(false); // Não está carregando se não tem token
+            setIsLoggedIn(false);
+            setCurrentUser(null);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fetchData]); // Adiciona fetchData como dependência
 
-    // Tela de login
-    if (!isLoggedIn) { return <LoginPage onLoginSuccess={handleLoginSuccess} />; }
+    // Callback para quando o login for bem-sucedido
+    const handleLoginSuccess = useCallback((loginData) => {
+        console.log("[App] Login OK. Iniciando busca de dados pós-login...");
+        setIsLoading(true); // Mostra carregando enquanto busca dados
+        setCurrentUser(null); // Limpa usuário anterior para forçar busca em fetchData
+        // fetchData será chamado pelo useEffect porque currentUser mudou para null
+        // OU podemos chamar diretamente:
+        // fetchData(false); // Mas precisa garantir que o estado currentUser seja atualizado *antes*
+        // A abordagem mais segura é deixar o useEffect reagir à limpeza do currentUser
+        // Ajuste: Vamos chamar fetchData diretamente após limpar currentUser para garantir.
+        fetchData(false); // Busca dados após login, sem arquivados
 
-    // Tela principal do dashboard
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fetchData]); // Depende de fetchData
+
+
+    // Callback para componentes filhos solicitarem atualização de dados
+    const handleDataNeedsRefresh = useCallback((includeArchived = false) => {
+        console.log(`[App] Solicitação de atualização de dados recebida. includeArchived=${includeArchived}`);
+        // Ativa o loading SÓ se não estiver já carregando de outra forma
+        // if (!isLoading) setIsLoading(true); // Opcional: Mostrar loading em refresh? Pode piscar.
+        fetchData(includeArchived);
+    }, [fetchData]); // Depende de fetchData
+
+
+    // Tela de Carregamento Inicial
+    if (isLoading && !currentUser) { // Mostra loading só se estiver realmente carregando dados iniciais
+        return <div className="loading-screen">Carregando...</div>;
+    }
+
+    // Tela de Login
+    if (!isLoggedIn) {
+        return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+    }
+
+    // Tela Principal (Dashboard)
     return (
         <div className="App main-app">
             <header className="app-header">
-                <img src={logo} alt="OneSid Logo" className="logo" />
+                <img src={logo} alt="MDR Advocacia Logo" className="logo" />
                 <div className="user-info">
-                    <span>Olá, {currentUser?.username || 'Usuário'}</span>
+                    <span>Olá, {currentUser?.username || 'Usuário'} ({currentUser?.role || 'N/D'})</span>
                     <button onClick={handleLogout} className="logout-button">Sair</button>
                 </div>
             </header>
             <main>
+                {/* Mensagem de Erro Global */}
                 {error && <p className="global-error-message">{error}</p>}
-                <SolicitacaoForm onSolicitacaoCriada={handleDataNeedsRefresh} />
+
+                 {/* Painel Admin - Renderizado Condicionalmente */}
+                 {currentUser?.role === 'admin' && (
+                     <AdminPanel currentUser={currentUser} onDataRefresh={handleDataNeedsRefresh} />
+                 )}
+
+                {/* Formulário de Criação de Solicitação (Todos usuários ativos podem ver) */}
+                <SolicitacaoForm onSolicitacaoCriada={() => handleDataNeedsRefresh(false)} /> {/* Sempre recarrega sem arquivados ao criar */}
+
+                {/* Tabela de Solicitações */}
                 <SolicitacoesTable
                     solicitacoes={solicitacoes}
-                    onDataRefresh={handleDataNeedsRefresh}
-                    currentUser={currentUser} // Passa o usuário atual para o modal
+                    currentUser={currentUser} // Passa o usuário atual para a tabela
+                    onDataRefresh={handleDataNeedsRefresh} // Passa a função de refresh
                 />
             </main>
         </div>
