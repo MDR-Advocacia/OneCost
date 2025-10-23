@@ -8,8 +8,9 @@ from config import API_BASE_URL
 
 log = logging.getLogger(__name__) # Logger específico
 
-# Variável global para armazenar o token JWT após o login
+# Variáveis globais para armazenar o token JWT e o ID do usuário robô
 _api_token: Optional[str] = None
+_robot_user_id: Optional[int] = None # NOVO: Armazena o ID do usuário robô
 
 # --- Funções Auxiliares ---
 
@@ -20,24 +21,64 @@ def _get_auth_headers() -> Dict[str, str]:
         headers['Authorization'] = f'Bearer {_api_token}'
     return headers
 
+def _fetch_robot_user_id() -> Optional[int]:
+    """Busca o ID do usuário robô logado usando o endpoint /users/me."""
+    if not _api_token:
+        log.error("Não é possível buscar ID do robô: Robô não autenticado.")
+        return None
+
+    me_url = f"{API_BASE_URL}/users/me"
+    headers = _get_auth_headers()
+    log.info(f"Buscando informações do usuário robô em {me_url}...")
+    try:
+        response = requests.get(me_url, headers=headers)
+        response.raise_for_status()
+        user_data = response.json()
+        user_id = user_data.get('id')
+        if isinstance(user_id, int):
+            log.info(f"ID do usuário robô obtido com sucesso: {user_id}")
+            return user_id
+        else:
+            log.error(f"ID do usuário robô não encontrado ou inválido na resposta de {me_url}: {user_data}")
+            return None
+    except requests.exceptions.RequestException as e:
+        log.error(f"Erro ao buscar informações do usuário robô ({me_url}): {e}")
+        if e.response is not None:
+             try:
+                 error_detail = e.response.json()
+                 log.error(f"Detalhes do erro da API (status {e.response.status_code}): {error_detail}")
+             except json.JSONDecodeError:
+                  log.error(f"Não foi possível decodificar a resposta de erro da API (status {e.response.status_code}): {e.response.text}")
+        return None
+    except Exception as e:
+        log.error(f"Erro inesperado ao buscar ID do usuário robô: {e}", exc_info=True)
+        return None
+
+
 # --- Funções da API ---
 
 def robot_login(username: str, password: str) -> bool:
-    """Faz login na API e armazena o token globalmente."""
-    global _api_token
-    _api_token = None # Reseta o token antes de tentar logar
+    """Faz login na API, armazena o token e busca o ID do usuário robô."""
+    global _api_token, _robot_user_id
+    _api_token = None # Reseta o token
+    _robot_user_id = None # Reseta o ID
     login_url = f"{API_BASE_URL}/login"
     payload = {'username': username, 'password': password}
     log.info(f"Tentando login na API como usuário '{username}' em {login_url}...")
 
     try:
-        # O /login espera dados de formulário (x-www-form-urlencoded)
         response = requests.post(login_url, data=payload, headers={'Content-Type': 'application/x-www-form-urlencoded'})
-        response.raise_for_status() # Lança exceção para 4xx/5xx
+        response.raise_for_status()
         data = response.json()
         if data.get("access_token"):
             _api_token = data["access_token"]
             log.info("Login do robô na API bem-sucedido. Token armazenado.")
+            # NOVO: Busca o ID do usuário após o login
+            _robot_user_id = _fetch_robot_user_id()
+            if _robot_user_id is None:
+                log.error("Falha ao obter o ID do usuário robô após o login. Verifique as permissões ou a resposta da API /users/me.")
+                # Decidir se deve falhar ou continuar sem o ID? Por enquanto, continua mas loga erro.
+                return False # Falha o login se não conseguir obter o ID
             return True
         else:
             log.error("Login na API OK, mas token não recebido.")
@@ -56,13 +97,12 @@ def resetar_solicitacoes_com_erro() -> bool:
     """Chama o endpoint para resetar solicitações com erro para Pendente."""
     reset_url = f"{API_BASE_URL}/solicitacoes/resetar-erros"
     headers = _get_auth_headers()
-    if not _api_token: # Verifica se estamos logados
+    if not _api_token:
         log.error("Não é possível resetar erros: Robô não autenticado (token ausente).")
         return False
 
     log.info(f"Chamando endpoint para resetar solicitações com erro em {reset_url}...")
     try:
-        # Usando POST para a nova rota
         response = requests.post(reset_url, headers=headers)
         response.raise_for_status()
         log.info(f"Resposta do reset de erros: {response.json().get('message', 'Status OK')}")
@@ -81,7 +121,7 @@ def resetar_solicitacoes_com_erro() -> bool:
 def get_proxima_solicitacao_pendente() -> Optional[Dict[str, Any]]:
     """Busca a próxima solicitação com status 'Pendente'."""
     get_url = f"{API_BASE_URL}/solicitacoes/"
-    params = {"status_robo": "Pendente", "limit": 1}
+    params = {"status_robo": "Pendente", "limit": 1} # Busca apenas uma pendente
     headers = _get_auth_headers()
     if not _api_token:
         log.error("Não é possível buscar solicitações: Robô não autenticado (token ausente).")
@@ -118,18 +158,25 @@ def update_solicitacao_na_api(solicitacao_id: int, payload: Dict[str, Any]) -> b
 
     headers['Content-Type'] = 'application/json'
 
-    # Remove chaves com valor None para evitar sobrescrever dados existentes com null
-    # O backend (server.py) foi ajustado para lidar com "Pendente" limpando os outros campos
+    # Limpa o payload de chaves com valor None, exceto as permitidas
     payload_limpo = {}
+    campos_permitidos_none = {'status_portal', 'ultima_verificacao_robo'}
     for k, v in payload.items():
-        if k == 'status_portal' or k == 'ultima_verificacao_robo': # Permite limpar esses campos enviando None
+        if k in campos_permitidos_none:
+            payload_limpo[k] = v
+        # NOVO: Inclui usuario_confirmacao_id mesmo se for None (embora deva ser int)
+        elif k == 'usuario_confirmacao_id':
             payload_limpo[k] = v
         elif v is not None: # Ignora outros Nones
             payload_limpo[k] = v
-            
-    # Garante que comprovantes_path seja uma lista de strings
-    if 'comprovantes_path' in payload_limpo:
-        payload_limpo['comprovantes_path'] = [str(p) for p in payload_limpo['comprovantes_path']]
+
+    # Garante que comprovantes_path seja uma lista de strings, se existir
+    if 'comprovantes_path' in payload_limpo and payload_limpo['comprovantes_path'] is not None:
+        if isinstance(payload_limpo['comprovantes_path'], list):
+             payload_limpo['comprovantes_path'] = [str(p) for p in payload_limpo['comprovantes_path']]
+        else:
+             log.warning(f"comprovantes_path para ID {solicitacao_id} não é uma lista, enviando como None.")
+             payload_limpo['comprovantes_path'] = None # Envia None se não for lista
 
     log.info(f"Enviando atualização para API (ID {solicitacao_id}): {json.dumps(payload_limpo, default=str)}")
     try:
@@ -146,4 +193,3 @@ def update_solicitacao_na_api(solicitacao_id: int, payload: Dict[str, Any]) -> b
              except json.JSONDecodeError:
                   log.error(f"Não foi possível decodificar a resposta de erro da API (status {e.response.status_code}): {e.response.text}")
         return False
-
