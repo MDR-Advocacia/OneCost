@@ -14,15 +14,26 @@ services:
 
   backend:
     build:
-      context: ./backend
+      # Contexto agora é a raiz do projeto
+      context: .
+      # Aponta para o Dockerfile dentro da pasta backend
+      dockerfile: backend/Dockerfile
     container_name: onecost_backend
     volumes:
+      # Mapeia a pasta do código do backend
       - ./backend:/app
+      # Mapeia o .env para dentro do container
+      - ./.env:/app/.env:ro
+      # ---> NOVA LINHA: Mapeia a pasta de comprovantes para uma pasta 'static' dentro do container <---
+      - ./comprovantes:/app/static/comprovantes
     ports:
       - "8001:8000"
     depends_on:
       - db
     restart: always
+    # Disponibiliza variáveis do .env para o container (útil para o entrypoint)
+    env_file:
+      - .env
 
   dashboard:
     build:
@@ -37,6 +48,8 @@ services:
     depends_on:
       - backend
     restart: always
+    env_file:
+      - .env
 
 volumes:
   postgres_data:

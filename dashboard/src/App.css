@@ -16,6 +16,15 @@ body {
   min-height: 100vh;
 }
 
+.loading-screen {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-size: 1.5rem;
+  color: white;
+}
+
 /* ============================================== */
 /* ===         LOGIN (de LoginPage.css)       === */
 /* ============================================== */
@@ -65,6 +74,10 @@ body {
   color: #f0f0f0;
 }
 
+input::placeholder {
+  color: #a0a0a0;
+}
+
 .login-button {
   width: 100%;
   padding: 12px 24px;
@@ -82,20 +95,11 @@ body {
   opacity: 0.9;
 }
 
-.error-message {
-  color: #ff6b6b;
-  background-color: rgba(255, 107, 107, 0.2);
-  padding: 10px;
-  border-radius: 8px;
-  margin-top: 1rem;
-}
-
-
 /* ============================================== */
 /* ===       DASHBOARD (de App.css)           === */
 /* ============================================== */
 
-.App {
+.App, .main-app {
   text-align: center;
 }
 
@@ -104,7 +108,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 1rem 2rem;
-  font-size: calc(10px + 2vmin);
+  font-size: 1rem; /* Padronizado */
   color: white;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
@@ -121,7 +125,6 @@ body {
   display: flex;
   align-items: center;
   gap: 1rem;
-  font-size: 1rem;
 }
 
 main {
@@ -133,16 +136,16 @@ main {
   gap: 2rem;
 }
 
-/* Mensagens de Formulário */
-.form-message {
+/* Mensagens de Formulário e Erro Global */
+.form-message, .global-error-message {
   text-align: center;
-  padding: 0.75rem;
+  padding: 0.75rem 1.25rem;
   border-radius: 8px;
-  margin-top: 1rem;
+  margin: 0.5rem 0 1rem 0; /* Ajustado */
   font-weight: bold;
 }
 
-.form-message.error {
+.form-message.error, .global-error-message {
   background-color: rgba(255, 107, 107, 0.2);
   border: 1px solid rgba(255, 107, 107, 0.4);
   color: #ff6b6b;
@@ -153,6 +156,7 @@ main {
   border: 1px solid rgba(46, 204, 113, 0.4);
   color: #2ecc71;
 }
+
 
 /* Card Genérico */
 .card {
@@ -177,9 +181,10 @@ main {
 
 /* Formulário de Solicitação */
 .solicitacao-form {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
+  align-items: center;
 }
 
 .form-group {
@@ -188,31 +193,24 @@ main {
   gap: 0.5rem;
 }
 
-.form-group label {
-  font-weight: bold;
-  color: #e0e0e0;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-}
-
-.form-group-checkbox {
+.form-group-checkbox.checkbox-container {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 0.75rem;
-  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  grid-column: span 1;
 }
 
-.form-group-checkbox label {
-  font-weight: normal;
+.form-group-checkbox input[type="checkbox"] {
+  width: auto;
 }
 
+/* Inputs */
 input[type="text"],
 input[type="number"],
-input[type="date"] {
+input[type="date"],
+input[type="password"] {
   width: 100%;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -225,9 +223,8 @@ input[type="date"] {
 input[type="date"] {
   color-scheme: dark;
 }
-
-input::placeholder {
-  color: #a0a0a0;
+input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
 }
 
 /* Botões */
@@ -255,6 +252,10 @@ button:disabled {
   opacity: 0.6;
 }
 
+.solicitacao-form button[type="submit"] {
+  grid-column: 1 / -1;
+}
+
 .logout-button {
   background-color: #ff6b6b;
   border: 1px solid rgba(255, 107, 107, 0.3);
@@ -271,20 +272,13 @@ button:disabled {
 /* ============================================== */
 
 .process-table-container {
-  padding: 2rem;
-  text-align: left;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.15);
   width: 100%;
-  overflow-x: auto;
 }
 
-.process-table-container h2 {
-  margin-bottom: 1.5rem;
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  position: relative;
 }
 
 table {
@@ -321,7 +315,7 @@ tbody tr:hover {
   padding: 5px;
   font-size: 1.2rem;
   box-shadow: none;
-  color: #e0e0e0; /* Adicionado para garantir que o emoji seja visível */
+  color: #e0e0e0;
 }
 .action-button:hover {
   transform: none;
@@ -329,43 +323,46 @@ tbody tr:hover {
   opacity: 0.8;
 }
 
-/* Status Badges */
-.status {
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 0.85rem;
-  font-weight: bold;
-  text-transform: capitalize;
-  white-space: nowrap;
+/* ============================================== */
+/* ===      MUDANÇA: STATUS UNIFICADO         === */
+/* ============================================== */
+
+/* Célula da tabela para o novo status */
+.status-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px; /* Espaço entre a bolinha e o texto */
+  min-width: 220px; /* Define uma largura mínima para a coluna */
 }
 
-.status-pendente, .status-na, .status-aguardando-robo {
-  background-color: #f0ad4e;
-  color: #333;
+/* A bolinha colorida (indicador do robô) */
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0; /* Impede que a bolinha encolha */
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
-.status-finalizado-com-sucesso, .status-efetivado-liquidado {
-  background-color: #2ecc71;
-  color: #333;
+
+/* Cores da bolinha */
+.status-indicator.status-pendente {
+  background-color: #f0ad4e; /* Laranja/Pendente */
 }
-.status-erro, .status-cancelado {
-  background-color: #e74c3c;
-  color: #fff;
+.status-indicator.status-finalizado {
+  background-color: #2ecc71; /* Verde/Finalizado */
 }
-.status-em-processamento {
-  background-color: #3498db;
-  color: #fff;
+.status-indicator.status-erro {
+  background-color: #e74c3c; /* Vermelho/Erro */
 }
-.status-aguardando-confirmacao, .status-finalizado-confirmacao-realizada {
-  background-color: #9b59b6;
-  color: #fff;
-}
-/* Fallback genérico para status desconhecidos */
-.status-finalizado-status-nao-processavel, 
-.status-finalizado-valor-divergente,
-.status-devolvido,
-.status-indeferido {
-  background-color: #7f8c8d;
-  color: #fff;
+
+/* O texto (status do portal ou robô) */
+.status-text {
+  white-space: normal; /* PERMITE QUEBRA DE LINHA */
+  line-height: 1.3;
+  font-size: 0.9rem;
+  text-align: left;
+  flex-grow: 1;
 }
 
 
@@ -385,6 +382,8 @@ tbody tr:hover {
   align-items: center;
   z-index: 1000;
   backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  padding: 1rem;
 }
 
 .modal-content {
@@ -394,9 +393,10 @@ tbody tr:hover {
   width: 90%;
   max-width: 700px;
   max-height: 90vh;
-  overflow-y: auto;
   box-shadow: 0 10px 30px rgba(0,0,0,0.3);
   border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
 }
 
 .modal-content h3 {
@@ -405,6 +405,7 @@ tbody tr:hover {
   color: #5bc0de;
   border-bottom: 1px solid #5bc0de;
   padding-bottom: 0.5rem;
+  flex-shrink: 0;
 }
 
 .modal-details {
@@ -412,6 +413,10 @@ tbody tr:hover {
   grid-template-columns: 1fr;
   gap: 1rem;
   font-size: 1rem;
+  overflow-y: auto; /* Scroll SÓ nos detalhes */
+  flex-grow: 1;
+  margin-bottom: 1rem;
+  padding-right: 0.5rem;
 }
 
 .modal-details p {
@@ -442,17 +447,54 @@ tbody tr:hover {
 .comprovantes-list a {
   color: #5bc0de;
   text-decoration: none;
+  word-break: break-all;
 }
 .comprovantes-list a:hover {
   text-decoration: underline;
 }
 
-.modal-close-button {
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 1rem;
   margin-top: 1.5rem;
-  float: right;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.modal-actions .form-message.error {
+  flex-grow: 1;
+  margin: 0;
+  text-align: left;
+  padding: 10px;
+  font-size: 0.9rem;
+}
+
+.modal-close-button {
   background-color: #7f8c8d;
+  margin-top: 0;
+  float: none;
 }
 .modal-close-button:hover {
   background-color: #95a5a6;
+}
+
+.modal-button-reset {
+  background-color: #f0ad4e;
+  color: #111;
+  margin-top: 0;
+  float: none;
+}
+.modal-button-reset:hover:not(:disabled) {
+  background-color: #ec971f;
+  box-shadow: 0 6px 20px rgba(240, 173, 78, 0.4);
+}
+.modal-button-reset:disabled {
+  background-color: #555;
+  color: #999;
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 

@@ -5,20 +5,26 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # Instala o cliente do PostgreSQL para o comando pg_isready
-RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/*
+# E instala python3-dotenv para o entrypoint.sh conseguir ler o .env
+RUN apt-get update && apt-get install -y postgresql-client python3-dotenv --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
-# Copia e instala as dependências do Python
-COPY requirements.txt .
+# Copia APENAS o requirements.txt primeiro para aproveitar o cache do Docker
+# Assume que requirements.txt está DENTRO da pasta backend
+COPY ./backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia TODOS os outros arquivos do backend
-COPY . .
+# Copia TODO o conteúdo da pasta backend local para /app no container
+COPY ./backend /app
 
-# A CORREÇÃO DEFINITIVA:
-# Executa o entrypoint usando o interpretador 'sh'.
-# Isso bypassa qualquer erro de "permission denied".
-ENTRYPOINT ["sh", "entrypoint.sh"]
+# *** DEBUG: Lista o conteúdo de /app para verificar a cópia ***
+RUN ls -la /app
 
-# Comando padrão que o entrypoint.sh irá executar no final
+# Garante que o entrypoint seja executável
+RUN chmod +x /app/entrypoint.sh
+
+# Executa o entrypoint diretamente.
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+# Comando padrão que o entrypoint.sh irá executar via 'exec "$@"'
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
 

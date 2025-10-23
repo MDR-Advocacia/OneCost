@@ -1,29 +1,74 @@
-from pathlib import Path
 import os
-from datetime import datetime
+import logging
+from pathlib import Path
+from dotenv import load_dotenv
 
-# --- Caminhos Base ---
-# Aponta para a raiz do projeto (a pasta que contém 'robot', 'backend', etc.)
+# --- Configuração de Logging Inicial ---
+# Configura o logging básico o mais cedo possível
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s - %(message)s')
+log = logging.getLogger(__name__) # Cria um logger específico para este módulo
+
+# --- Carregar Variáveis de Ambiente ---
+try:
+    # Procura pelo .env na pasta raiz do projeto (OneCost-1)
+    dotenv_path = Path(__file__).resolve().parent.parent / '.env'
+    log.info(f"Tentando carregar .env de: {dotenv_path}")
+    if dotenv_path.exists():
+        load_dotenv(dotenv_path=dotenv_path)
+        log.info("Arquivo .env carregado com sucesso.")
+    else:
+        log.warning(f"Arquivo .env não encontrado em {dotenv_path}. Usando valores padrão/variáveis de ambiente existentes.")
+except Exception as e:
+    log.error(f"Erro ao carregar .env: {e}")
+
+# --- Constantes de Configuração ---
+
+# Diretórios
+# BASE_DIR agora aponta para a raiz do projeto (OneCost-1)
+# para consistência com o que `browser_manager` espera.
 BASE_DIR = Path(__file__).resolve().parent.parent
-LOG_DIR = BASE_DIR / "logs"
-SCRIPTS_DIR = BASE_DIR / "scripts"
-# NOVO: Diretório para salvar os comprovantes
+ROBOT_DIR = BASE_DIR / "robot" # Diretório específico do robô
+
 COMPROVANTES_DIR = BASE_DIR / "comprovantes"
+# CORREÇÃO: SCRIPTS_DIR definido corretamente usando BASE_DIR
+SCRIPTS_DIR = BASE_DIR / "scripts"
+# CORREÇÃO: Nome correto da variável LOG_DIR e caminho relativo ao ROBOT_DIR
+LOG_DIR = ROBOT_DIR / "logs"
 
+# Cria os diretórios se não existirem
+try:
+    COMPROVANTES_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log.info(f"Diretório de comprovantes: {COMPROVANTES_DIR}")
+    log.info(f"Diretório de logs: {LOG_DIR}")
+except Exception as e:
+    log.error(f"Erro ao criar diretórios: {e}")
 
-# --- Configurações do Robô ---
-# URL de custas com o '*' no final, como solicitado
-URL_PORTAL_CUSTAS = "https://juridico.bb.com.br/paj/app/paj-custos/spas/custos/custos.app.html#/inicio/*"
+# URL do portal de custas
+URL_PORTAL_CUSTAS = os.getenv("URL_PORTAL_CUSTAS", "https://juridico.bb.com.br/paj/app/paj-custos/spas/custos/custos.app.html#/inicio/*")
 
+# Credenciais do robô para login na API do backend
+ROBOT_USERNAME = os.getenv("ROBOT_USERNAME", "robot")
+ROBOT_PASSWORD = os.getenv("ROBOT_PASSWORD", "default_password")
 
-# --- Configurações de Login (Restauradas para o seu browser_manager) ---
-CDP_ENDPOINT = "http://localhost:9222"
-# CORREÇÃO: ID da extensão corrigido, sem o "/page"
-EXTENSION_URL = "chrome-extension://lnidijeaekolpfeckelhkomndglcglhh/index.html"
+# Timeout para esperar por downloads (em milissegundos)
+DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT_MS", "60000")) # 60 segundos por padrão
+log.info(f"Usando DOWNLOAD_TIMEOUT de {DOWNLOAD_TIMEOUT}ms")
 
-# --- Configurações da API Interna ---
-# Para rodar localmente fora do Docker, use "http://localhost:8001"
-# Para rodar o robô dentro do Docker (no futuro), usaríamos "http://backend:8000"
-API_BASE_URL = "http://localhost:8001" 
-API_USERNAME = "admin"
-API_PASSWORD = "admin"
+# Configurações de Login via Extensão/CDP
+CDP_ENDPOINT = os.getenv("CDP_ENDPOINT", "http://localhost:9222")
+EXTENSION_URL = os.getenv("EXTENSION_URL", "chrome-extension://lnidijeaekolpfeckelhkomndglcglhh/index.html")
+# Ajuste o CHROME_USER_DATA_DIR se necessário para sua máquina
+CHROME_USER_DATA_DIR = os.getenv("CHROME_USER_DATA_DIR", str(Path.home() / "chrome-dev-profile-onecost"))
+log.info(f"Usando CHROME_USER_DATA_DIR: {CHROME_USER_DATA_DIR}")
+
+# URL base da API do backend
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8001") # Corresponde ao docker-compose
+log.info(f"Usando API_BASE_URL: {API_BASE_URL}")
+
+# Verifica se os diretórios essenciais foram criados (apenas loga)
+if not LOG_DIR.exists():
+     log.error(f"Falha ao verificar/criar diretório de logs: {LOG_DIR}")
+if not SCRIPTS_DIR.exists():
+     log.warning(f"Diretório de scripts não encontrado: {SCRIPTS_DIR}")
+

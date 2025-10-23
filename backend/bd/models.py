@@ -17,18 +17,19 @@ class SolicitacaoCusta(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     npj = Column(String, index=True, nullable=False)
-    numero_processo = Column(String, index=True, nullable=True)
+    # Permitir que seja nulo inicialmente, pois o robô vai preencher
+    numero_processo = Column(String, index=True, nullable=True) 
     numero_solicitacao = Column(String, nullable=False)
     valor = Column(Numeric(10, 2), nullable=False)
     data_solicitacao = Column(Date, nullable=False)
     aguardando_confirmacao = Column(Boolean, default=True)
     usuario_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
-    # --- NOVOS CAMPOS PARA O ROBÔ ---
-    status_portal = Column(String, nullable=True)
-    status_robo = Column(String, default="Pendente", nullable=False)
+    # --- CAMPOS DO ROBÔ ---
+    status_portal = Column(String, nullable=True, default="Aguardando Robô") # Status inicial
+    status_robo = Column(String, default="Pendente", nullable=False) # Status inicial
     ultima_verificacao_robo = Column(DateTime, nullable=True)
-    comprovantes_path = Column(JSON, nullable=True) # Armazenará uma lista de caminhos
+    # ALTERAÇÃO: Usar JSON para armazenar a lista de caminhos
+    comprovantes_path = Column(JSON, nullable=True) 
 
     usuario = relationship("User", back_populates="solicitacoes")
-

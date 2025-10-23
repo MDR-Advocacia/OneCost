@@ -1,14 +1,14 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator # Adicionado field_validator
 from typing import Optional, List
 from datetime import date, datetime
+import json # Adicionado json
 
 # --- Schema para Solicitação de Custa (Base) ---
-# Campos que o usuário envia ao criar
 class SolicitacaoCustaBase(BaseModel):
     npj: str
     numero_processo: Optional[str] = None
     numero_solicitacao: str
-    valor: float
+    valor: float # Mantido como float para entrada/saída API, convertido no backend
     data_solicitacao: date
     aguardando_confirmacao: bool = True
 
@@ -17,12 +17,19 @@ class SolicitacaoCustaCreate(SolicitacaoCustaBase):
     pass
 
 # Schema para atualização (usado pelo Robô)
-# Todos os campos são opcionais, pois o robô pode atualizar só o status ou só os comprovantes
 class SolicitacaoCustaUpdate(BaseModel):
     status_portal: Optional[str] = None
     status_robo: Optional[str] = None
-    comprovantes_path: Optional[str] = None
+    # CORREÇÃO: Deve ser uma lista de strings
+    comprovantes_path: Optional[List[str]] = None
     valor: Optional[float] = None # Robô pode corrigir o valor se necessário
+    numero_processo: Optional[str] = None # Permitir que robô atualize nº processo
+
+    # Garante que campos vazios sejam None
+    @field_validator('status_portal', 'status_robo', 'numero_processo', mode='before')
+    @classmethod
+    def empty_str_to_none(cls, v):
+        return None if v == "" else v
 
 # --- Schema para Usuário (Base) ---
 class UserBase(BaseModel):
@@ -34,29 +41,44 @@ class UserCreate(UserBase):
 # Schema para exibir o usuário (sem a senha)
 class User(UserBase):
     id: int
-    # Configuração para ler o modelo do SQLAlchemy
     model_config = ConfigDict(from_attributes=True)
 
 
-# --- Schema para Solicitação de Custa (Completo) ---
-# Campos que são lidos da API (inclui dados do robô e do usuário)
+# --- Schema para Solicitação de Custa (Completo - Resposta da API) ---
 class SolicitacaoCusta(SolicitacaoCustaBase):
     id: int
     usuario_id: int
     status_portal: Optional[str] = None
     status_robo: Optional[str] = None
     ultima_verificacao_robo: Optional[datetime] = None
-    comprovantes_path: Optional[str] = None
-    
-    # Aninha o schema do usuário para mostrar quem criou
-    usuario: User 
+    # CORREÇÃO: Deve ser uma lista de strings ou None
+    comprovantes_path: Optional[List[str]] = None
 
-    # Configuração para ler o modelo do SQLAlchemy
+    usuario: User
+
     model_config = ConfigDict(from_attributes=True)
 
+    # Adicionado validador para garantir que o JSON do banco seja convertido para lista
+    @field_validator('comprovantes_path', mode='before')
+    @classmethod
+    def parse_json_string(cls, value):
+        if isinstance(value, str):
+            try:
+                # Tenta decodificar string JSON (ex: '["path1", "path2"]')
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    return parsed
+                # Se não for uma lista após parse, retorna None ou trata como erro
+                return None
+            except json.JSONDecodeError:
+                # Se for uma string simples (legado?), retorna como lista de um item
+                # Ou retorna None se não for um caminho válido
+                # Ajuste essa lógica se necessário
+                return [value] if value else None
+        # Se já for None ou List, retorna como está
+        return value
 
-# --- Schema para Token (ESSENCIAL PARA O LOGIN) ---
-# Esta é a classe que estava faltando
+# --- Schema para Token ---
 class Token(BaseModel):
     access_token: str
     token_type: str

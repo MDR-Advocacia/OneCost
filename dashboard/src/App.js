@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-// CORREÇÃO: Removido checkLoginStatus do import, adicionado getCurrentUser e login (necessário para LoginPage interno)
-import { login, getCurrentUser, getSolicitacoes, createSolicitacao } from './api';
-import './App.css'; // Assume que este CSS contém os estilos do LoginPage.css também
-import logo from './assets/logo-onesid.png'; // Garante que o logo seja importado
+import { createPortal } from 'react-dom'; 
+// ---> MUDANÇA: Importar API_URL <---
+import { API_URL, login, getCurrentUser, getSolicitacoes, createSolicitacao, updateSolicitacao } from './api';
+import './App.css';
+import logo from './assets/logo-onesid.png';
+import LoginPage from './LoginPage';
 
-// --- COMPONENTE DO FORMULÁRIO ---
+// --- COMPONENTE DO FORMULÁRIO (SolicitacaoForm) ---
+// (Sem alterações, omitido para brevidade. O código dele permanece o mesmo)
 const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
     const [npj, setNpj] = useState('');
     const [numeroProcesso, setNumeroProcesso] = useState('');
@@ -25,7 +28,7 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
         try {
             const dados = {
                 npj,
-                numero_processo: numeroProcesso,
+                numero_processo: numeroProcesso || null,
                 numero_solicitacao: numeroSolicitacao,
                 valor: parseFloat(valor),
                 data_solicitacao: dataSolicitacao,
@@ -33,14 +36,13 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
             };
             await createSolicitacao(dados);
             setSuccess('Solicitação criada com sucesso!');
-            // Limpa o formulário
             setNpj('');
             setNumeroProcesso('');
             setNumeroSolicitacao('');
             setValor('');
-            setDataSolicitacao(new Date().toISOString().split('T')[0]); // Reseta a data
-            setAguardandoConfirmacao(true); // Reseta o checkbox
-            // Chama a função do componente pai para atualizar a lista
+            setDataSolicitacao(new Date().toISOString().split('T')[0]);
+            setAguardandoConfirmacao(true);
+            setTimeout(() => setSuccess(''), 3000);
             onSolicitacaoCriada();
         } catch (err) {
             setError('Erro ao criar solicitação: ' + (err.response?.data?.detail || err.message || 'Verifique os dados'));
@@ -54,66 +56,22 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
             <h2>Adicionar Solicitação de Custa</h2>
             <form onSubmit={handleSubmit} className="solicitacao-form">
                 <div className="form-group">
-                    {/* <label htmlFor="npj">NPJ</label> */}
-                    <input
-                        id="npj"
-                        type="text"
-                        value={npj}
-                        onChange={(e) => setNpj(e.target.value)}
-                        placeholder="NPJ *"
-                        required
-                    />
+                    <input id="npj" type="text" value={npj} onChange={(e) => setNpj(e.target.value)} placeholder="NPJ *" required />
                 </div>
                 <div className="form-group">
-                   {/* <label htmlFor="numeroProcesso">Número do Processo (Opcional)</label> */}
-                    <input
-                        id="numeroProcesso"
-                        type="text"
-                        value={numeroProcesso}
-                        onChange={(e) => setNumeroProcesso(e.target.value)}
-                        placeholder="Número do Processo (Opcional)"
-                    />
+                    <input id="numeroProcesso" type="text" value={numeroProcesso} onChange={(e) => setNumeroProcesso(e.target.value)} placeholder="Número do Processo (Opcional)" />
                 </div>
                 <div className="form-group">
-                   {/* <label htmlFor="numeroSolicitacao">Número da Solicitação</label> */}
-                    <input
-                        id="numeroSolicitacao"
-                        type="text"
-                        value={numeroSolicitacao}
-                        onChange={(e) => setNumeroSolicitacao(e.target.value)}
-                        placeholder="Número da Solicitação *"
-                        required
-                    />
+                    <input id="numeroSolicitacao" type="text" value={numeroSolicitacao} onChange={(e) => setNumeroSolicitacao(e.target.value)} placeholder="Número da Solicitação *" required />
                 </div>
                  <div className="form-group">
-                   {/* <label htmlFor="valor">Valor (R$)</label> */}
-                    <input
-                        id="valor"
-                        type="number"
-                        step="0.01"
-                        value={valor}
-                        onChange={(e) => setValor(e.target.value)}
-                        placeholder="Valor (R$) *"
-                        required
-                    />
+                    <input id="valor" type="number" step="0.01" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="Valor (R$) *" required />
                 </div>
                 <div className="form-group">
-                    {/* <label htmlFor="dataSolicitacao">Data da Solicitação</label> */}
-                    <input
-                        id="dataSolicitacao"
-                        type="date"
-                        value={dataSolicitacao}
-                        onChange={(e) => setDataSolicitacao(e.target.value)}
-                        required
-                    />
+                    <input id="dataSolicitacao" type="date" value={dataSolicitacao} onChange={(e) => setDataSolicitacao(e.target.value)} required />
                 </div>
                 <div className="form-group-checkbox checkbox-container">
-                    <input
-                        id="aguardandoConfirmacao"
-                        type="checkbox"
-                        checked={aguardandoConfirmacao}
-                        onChange={(e) => setAguardandoConfirmacao(e.target.checked)}
-                    />
+                    <input id="aguardandoConfirmacao" type="checkbox" checked={aguardandoConfirmacao} onChange={(e) => setAguardandoConfirmacao(e.target.checked)} />
                     <label htmlFor="aguardandoConfirmacao">Aguardando Confirmação</label>
                 </div>
                 <button type="submit" disabled={isLoading}>
@@ -127,17 +85,21 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
 };
 
 
-// --- COMPONENTE DA TABELA ---
-const SolicitacoesTable = ({ solicitacoes }) => {
+// --- COMPONENTE DA TABELA (SolicitacoesTable) ---
+const SolicitacoesTable = ({ solicitacoes, onDataRefresh }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedSolicitacao, setSelectedSolicitacao] = useState(null);
+    const [isModalLoading, setIsModalLoading] = useState(false);
+    const [modalError, setModalError] = useState('');
 
     const openModal = (solicitacao) => {
         setSelectedSolicitacao(solicitacao);
         setIsModalOpen(true);
+        setModalError('');
     };
 
     const closeModal = () => {
+        if (isModalLoading) return;
         setIsModalOpen(false);
         setSelectedSolicitacao(null);
     };
@@ -145,69 +107,93 @@ const SolicitacoesTable = ({ solicitacoes }) => {
     const formatData = (dataString) => {
         if (!dataString) return 'N/A';
         try {
-            // Tenta formatar data e hora
-            const data = new Date(dataString);
-            if (isNaN(data.getTime())) return dataString; // Retorna string original se data for inválida
-
-            if (dataString.includes('T') || dataString.includes(' ')) { // Verifica se tem hora
-                return data.toLocaleString('pt-BR');
+            const dataUTC = new Date(dataString.endsWith('Z') || dataString.includes('+') ? dataString : dataString + 'Z');
+            if (isNaN(dataUTC.getTime())) {
+                const parts = dataString.split('-');
+                if (parts.length === 3) {
+                    const dataOnly = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+                     if (!isNaN(dataOnly.getTime())) {
+                         return dataOnly.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+                     }
+                }
+                return dataString;
             }
-            // Formata apenas data (adiciona fuso UTC para evitar problemas de dia)
-            return data.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+            if (dataString.includes('T') || dataString.includes(' ')) {
+                return dataUTC.toLocaleString('pt-BR', {});
+            } else {
+                return dataUTC.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+            }
         } catch (e) {
              console.error("Erro formatando data:", dataString, e);
-            return dataString; // Retorna original em caso de erro
+            return dataString;
         }
     };
 
-   const formatComprovantes = (paths) => {
-        if (!paths) {
-            return <li>Nenhum</li>;
-        }
-         // Se for string JSON, parseia
+    // ---> MUDANÇA: Função formatComprovantes agora usa API_URL <---
+    const formatComprovantes = (paths) => {
+        if (!paths) return <li>Nenhum</li>;
         let links = [];
         try {
-             // Verifica se já é array (vindo de atualização recente) ou string JSON
-            if (Array.isArray(paths)) {
-                links = paths;
-            } else if (typeof paths === 'string' && paths.startsWith('[')) {
-                 links = JSON.parse(paths);
-             } else if (typeof paths === 'string') {
-                 // Assume que é um caminho único ou múltiplos separados por vírgula (legado)
-                 links = paths.split(',').map(p => p.trim()).filter(p => p);
-             }
-        } catch (e) {
-            console.error("Erro ao parsear comprovantes_path:", paths, e);
-            return <li>Erro ao ler comprovantes</li>; // Informa erro
-        }
-
-
-        if (!Array.isArray(links) || links.length === 0) {
-            return <li>Nenhum</li>;
-        }
-
+            if (Array.isArray(paths)) { links = paths; }
+            else if (typeof paths === 'string' && paths.startsWith('[')) { links = JSON.parse(paths); }
+            // Fallback para string simples (legado)
+            else if (typeof paths === 'string' && paths.trim() !== '') { links = [paths]; } 
+        } catch (e) { console.error("Erro ao parsear comprovantes_path:", paths, e); return <li>Erro ao ler caminhos</li>; }
+        
+        if (!Array.isArray(links) || links.length === 0) return <li>Nenhum</li>;
+        
         return links.map((link, index) => {
+            // link agora é o caminho relativo (ex: 'NPJ_LIMPO/arquivo.pdf')
             const nomeArquivo = link.split(/[\\/]/).pop() || 'Comprovante';
-            // TODO: Criar URL de download no backend
-            const downloadUrl = `#${link}`; // Placeholder
+            
+            // ---> MUDANÇA: Construir a URL completa para o backend <---
+            // Garante que não haja barras duplicadas
+            const staticPath = "static/comprovantes";
+            const downloadUrl = `${API_URL.replace(/\/$/, '')}/${staticPath}/${link.replace(/^\//, '')}`;
+            
             return (
                 <li key={index}>
-                    <a href={downloadUrl} target="_blank" rel="noopener noreferrer">{nomeArquivo}</a>
+                    {/* Adicionado atributo 'download' para sugerir download */}
+                    <a href={downloadUrl} target="_blank" rel="noopener noreferrer" download={nomeArquivo}>
+                        {nomeArquivo}
+                    </a>
                 </li>
             );
         });
     };
 
-     const getStatusClass = (status) => {
-        if (!status) return 'status-pendente'; // Default
-        return `status-${status.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
-     };
+     const getRoboStatusClass = (statusRobo) => {
+        const s = (statusRobo || 'pendente').toLowerCase();
+        if (s.includes('erro')) { return 'erro'; }
+        if (s.includes('finalizado')) { return 'finalizado'; }
+        return 'pendente';
+    };
+
+    const handleResetPendente = async () => {
+        if (!selectedSolicitacao) return;
+        setIsModalLoading(true);
+        setModalError('');
+        try {
+            await updateSolicitacao(selectedSolicitacao.id, {
+                status_robo: "Pendente",
+                status_portal: null,
+                ultima_verificacao_robo: null
+            });
+            if (onDataRefresh) { onDataRefresh(); }
+            closeModal();
+        } catch (err) {
+            console.error("Erro ao resetar solicitação:", err);
+            setModalError('Falha ao resetar: ' + (err.response?.data?.detail || err.message));
+        } finally {
+            setIsModalLoading(false);
+        }
+    };
 
 
     return (
-        <div className="process-table-container card"> {/* Adicionado card aqui */}
+        <div className="process-table-container card">
             <h2>Solicitações Cadastradas</h2>
-             <div className="table-wrapper"> {/* Garante scroll horizontal se necessário */}
+             <div className="table-wrapper">
                 <table>
                     <thead>
                         <tr>
@@ -216,54 +202,54 @@ const SolicitacoesTable = ({ solicitacoes }) => {
                             <th>Valor (R$)</th>
                             <th>Data Solicitação</th>
                             <th>Criado Por</th>
-                            <th>Status Portal</th>
-                            <th>Status Robô</th>
+                            <th>Status</th>
                             <th>Ações</th>
                         </tr>
                     </thead>
                     <tbody>
                         {solicitacoes.length > 0 ? (
-                            solicitacoes.map(item => (
-                                <tr key={item.id}>
-                                    <td>{item.npj}</td>
-                                    <td>{item.numero_solicitacao}</td>
-                                    <td>{typeof item.valor === 'number' ? item.valor.toFixed(2) : parseFloat(item.valor || 0).toFixed(2)}</td>
-                                    <td>{formatData(item.data_solicitacao)}</td>
-                                    <td>{item.usuario?.username || 'Desconhecido'}</td>
-                                    <td>
-                                        <span className={`status ${getStatusClass(item.status_portal)}`}>
-                                            {item.status_portal || 'N/A'}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <span className={`status ${getStatusClass(item.status_robo)}`}>
-                                            {item.status_robo || 'Pendente'}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <button onClick={() => openModal(item)} className="action-button" title="Ver Detalhes">
-                                            👁️
-                                        </button>
-                                        {/* Adicionar outros botões aqui se necessário */}
-                                    </td>
-                                </tr>
-                            ))
-                        ) : (
-                            <tr>
-                                <td colSpan="8">Nenhuma solicitação cadastrada ainda.</td>
-                            </tr>
-                        )}
+                            solicitacoes.map(item => {
+                                const statusRoboClasse = getRoboStatusClass(item.status_robo);
+                                // O texto prioriza o status do portal, se existir.
+                                const statusText = item.status_portal || item.status_robo || 'Pendente';
+                                
+                                return (
+                                    <tr key={item.id}>
+                                        <td>{item.npj}</td>
+                                        <td>{item.numero_solicitacao}</td>
+                                        <td>{typeof item.valor === 'number' ? item.valor.toFixed(2) : parseFloat(item.valor || 0).toFixed(2)}</td>
+                                        <td>{formatData(item.data_solicitacao)}</td>
+                                        <td>{item.usuario?.username || 'Desconhecido'}</td>
+                                        <td>
+                                          <div className="status-cell">
+                                            <span 
+                                              className={`status-indicator status-${statusRoboClasse}`}
+                                              title={`Status Robô: ${item.status_robo || 'Pendente'}`}
+                                            ></span>
+                                            <span className="status-text">
+                                              {statusText}
+                                            </span>
+                                          </div>
+                                        </td>
+                                        <td>
+                                            <button onClick={() => openModal(item)} className="action-button" title="Ver Detalhes e Ações">
+                                                👁️
+                                            </button>
+                                        </td>
+                                    </tr>
+                                );
+                            })
+                        ) : ( <tr><td colSpan="7">Nenhuma solicitação cadastrada ainda.</td></tr> )}
                     </tbody>
                 </table>
-             </div> {/* Fim table-wrapper */}
+             </div>
 
-            {/* O Modal continua aqui... */}
-             {isModalOpen && selectedSolicitacao && (
+            {/* Modal (Renderizado via Portal) */}
+             {isModalOpen && selectedSolicitacao && createPortal(
                 <div className="modal-backdrop" onClick={closeModal}>
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
-                        <h3>Detalhes da Solicitação</h3>
+                        <h3>Detalhes da Solicitação (ID: {selectedSolicitacao.id})</h3>
                         <div className="modal-details">
-                            <p><strong>ID:</strong> {selectedSolicitacao.id}</p>
                             <p><strong>NPJ:</strong> {selectedSolicitacao.npj}</p>
                             <p><strong>Nº Processo:</strong> {selectedSolicitacao.numero_processo || 'N/A'}</p>
                             <p><strong>Nº Solicitação:</strong> {selectedSolicitacao.numero_solicitacao}</p>
@@ -276,84 +262,26 @@ const SolicitacoesTable = ({ solicitacoes }) => {
                             <p><strong>Última Verificação Robô:</strong> {formatData(selectedSolicitacao.ultima_verificacao_robo)}</p>
                             <p><strong>Aguardando Confirmação (Usuário):</strong> {selectedSolicitacao.aguardando_confirmacao ? 'Sim' : 'Não'}</p>
                             <hr />
-                            <p><strong>Comprovantes:</strong></p>
-                            <ul className="comprovantes-list">
-                                {formatComprovantes(selectedSolicitacao.comprovantes_path)}
-                            </ul>
+                            <p><strong>Comprovantes/Documentos:</strong></p>
+                            <ul className="comprovantes-list">{formatComprovantes(selectedSolicitacao.comprovantes_path)}</ul>
                         </div>
-                        <button onClick={closeModal} className="modal-close-button">Fechar</button>
+                        <div className="modal-actions">
+                            {modalError && <p className="form-message error">{modalError}</p>}
+                            <button 
+                                onClick={handleResetPendente} 
+                                className="modal-button-reset" 
+                                disabled={isModalLoading}
+                            >
+                                {isModalLoading ? "Resetando..." : "Resetar para Pendente"}
+                            </button>
+                            <button onClick={closeModal} className="modal-close-button" disabled={isModalLoading}>
+                                Fechar
+                            </button>
+                        </div>
                     </div>
-                </div>
+                </div>,
+                document.getElementById('modal-root')
             )}
-        </div>
-    );
-};
-
-
-// --- COMPONENTE DA TELA DE LOGIN (RESTAURADO) ---
-const LoginPage = ({ onLoginSuccess }) => {
-    const [username, setUsername] = useState('');
-    const [password, setPassword] = useState('');
-    const [error, setError] = useState('');
-    const [isLoading, setIsLoading] = useState(false); // Adicionado estado de loading
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setIsLoading(true); // Ativa loading
-        setError('');
-        try {
-            // Usa a função login importada de api.js
-            const responseData = await login(username, password);
-            // api.js já salva o token no localStorage
-            onLoginSuccess(responseData); // Chama a função do App.js
-        } catch (err) {
-            console.error('[LoginPage] Erro no handleSubmit:', err);
-             let errorMessage = 'Falha no login. Verifique suas credenciais.';
-             if (err.response && err.response.data && err.response.data.detail) {
-                 errorMessage = err.response.data.detail; // Usa a mensagem de erro da API se disponível
-             } else if (err.message) {
-                 errorMessage = err.message;
-             }
-            setError(errorMessage);
-            setIsLoading(false); // Desativa loading em caso de erro
-        }
-        // Não precisa mais desativar o loading aqui, pois onLoginSuccess fará o App.js recarregar
-    };
-
-    return (
-        <div className="login-container">
-            <div className="login-box">
-                <img src={logo} alt="OneSid Logo" className="login-logo" />
-                <h2>Acessar Painel</h2>
-                <form onSubmit={handleSubmit}>
-                    <div className="input-group">
-                        <input
-                            type="text"
-                            id="username"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value)}
-                            placeholder="Usuário"
-                            required
-                            disabled={isLoading} // Desabilita input durante o loading
-                        />
-                    </div>
-                    <div className="input-group">
-                        <input
-                            type="password"
-                            id="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            placeholder="Senha"
-                            required
-                            disabled={isLoading} // Desabilita input durante o loading
-                        />
-                    </div>
-                    <button type="submit" className="login-button" disabled={isLoading}>
-                        {isLoading ? 'Entrando...' : 'Entrar'}
-                    </button>
-                    {error && <p className="error-message">{error}</p>}
-                </form>
-            </div>
         </div>
     );
 };
@@ -363,122 +291,81 @@ const LoginPage = ({ onLoginSuccess }) => {
 function App() {
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
-    const [currentUser, setCurrentUser] = useState(null); // Alterado para armazenar o objeto do usuário
+    const [currentUser, setCurrentUser] = useState(null);
     const [solicitacoes, setSolicitacoes] = useState([]);
     const [error, setError] = useState('');
 
-    // Função para buscar todos os dados necessários
     const fetchData = async () => {
-        setError(''); // Limpa erros anteriores
         console.log("Chamando fetchData...");
         try {
-            // 1. Busca dados do usuário logado
-            const userResponse = await getCurrentUser(); // Usa a função correta
+            const userResponse = await getCurrentUser();
             console.log("Dados do usuário recebidos:", userResponse);
-            setCurrentUser(userResponse); // Armazena o objeto do usuário
-
-            // 2. Busca lista de solicitações
+            setCurrentUser(userResponse);
             const solicitacoesResponse = await getSolicitacoes();
              console.log("Solicitações recebidas:", solicitacoesResponse);
-             // Ordena as solicitações pela mais recente (maior ID) antes de setar
             setSolicitacoes(solicitacoesResponse.sort((a, b) => b.id - a.id));
-
-            setIsLoggedIn(true); // Confirma que está logado
-
+            setIsLoggedIn(true);
+            setError('');
         } catch (err) {
              console.error("Erro detalhado em fetchData:", err);
-            let detailedError = err.message || 'Verifique a conexão com a API';
+            let detailedError = err.message || 'Verifique a conexão';
             if (err.response) {
-                // Erro vindo da API
                 detailedError = `Erro ${err.response.status}: ${err.response.data?.detail || err.message}`;
-                 if (err.response.status === 401) {
-                    console.log("Token inválido ou expirado. Deslogando.");
-                    handleLogout(); // Desloga se o token for inválido
-                    detailedError = "Sessão expirada. Faça login novamente.";
-                 }
-            } else if (err.request) {
-                 // Requisição feita mas sem resposta
-                 detailedError = "Não foi possível conectar ao servidor. Verifique se o backend está rodando.";
-            }
+                 if (err.response.status === 401) { handleLogout(); detailedError = "Sessão expirada. Faça login novamente."; }
+            } else if (err.request) { detailedError = "Sem resposta do servidor."; }
              setError('Erro ao buscar dados: ' + detailedError);
-             // Mesmo com erro, se for 401, handleLogout já cuidou de setIsLoggedIn(false)
-             // Se não for 401, talvez ainda esteja logado mas com erro de dados.
-             // Vamos garantir que não fique em estado inconsistente:
-             if (!localStorage.getItem('token')) {
-                 setIsLoggedIn(false);
-                 setCurrentUser(null);
-             }
-        } finally {
-             setIsLoading(false); // Garante que o loading termine
-        }
+             if (!localStorage.getItem('token')) { setIsLoggedIn(false); setCurrentUser(null); }
+        } finally { setIsLoading(false); }
     };
 
-
-    // Verifica o login inicial ao carregar o app
     useEffect(() => {
-        console.log("Verificando token no localStorage...");
+        console.log("Verificando token...");
         const token = localStorage.getItem('token');
-        if (token) {
-            console.log("Token encontrado. Tentando buscar dados...");
-            fetchData(); // Busca dados se o token existir
-        } else {
-            console.log("Nenhum token encontrado. Indo para tela de login.");
-            setIsLoading(false); // Não está logado, termina o loading
-        }
-    }, []); // Array vazio garante que rode apenas uma vez ao montar
+        if (token) { console.log("Token encontrado. Buscando dados..."); fetchData(); }
+        else { console.log("Nenhum token. Indo para login."); setIsLoading(false); }
+    }, []);
 
-    const handleLoginSuccess = (loginData) => { // Aceita os dados do login
-        console.log("Login bem-sucedido, buscando dados...");
-        setIsLoading(true); // Ativa o loading enquanto busca dados pós-login
-        // Não precisa setar o token aqui, pois api.js já faz isso
-        fetchData(); // Busca os dados do usuário e solicitações
+    const handleLoginSuccess = (loginData) => {
+        console.log("Login OK, buscando dados...");
+        setIsLoading(true);
+        fetchData();
     };
 
     const handleLogout = () => {
         console.log("Executando logout...");
         localStorage.removeItem('token');
         setIsLoggedIn(false);
-        setCurrentUser(null); // Limpa o usuário
+        setCurrentUser(null);
         setSolicitacoes([]);
-        setError(''); // Limpa erros
-        setIsLoading(false); // Garante que não fique carregando
+        setError('');
+        setIsLoading(false);
     };
 
-    // Função para ser chamada pelo formulário (atualiza a lista)
-    const handleSolicitacaoCriada = () => {
-        console.log("Nova solicitação criada, atualizando a lista...");
-        fetchData(); // Re-busca todas as solicitações
+    const handleDataNeedsRefresh = () => {
+        console.log("Solicitação de atualização de dados recebida, buscando...");
+        fetchData();
     };
 
-    if (isLoading) {
-        return <div className="loading-screen">Carregando...</div>; // Tela de loading melhorada
-    }
+    if (isLoading) { return <div className="loading-screen">Carregando...</div>; }
 
-    if (!isLoggedIn) {
-         // Passa a função correta para LoginPage
-        return <LoginPage onLoginSuccess={handleLoginSuccess} />; // RENDERIZA O LOGINPAGE DEFINIDO ACIMA
-    }
+    if (!isLoggedIn) { return <LoginPage onLoginSuccess={handleLoginSuccess} />; }
 
-    // Se logado, mostra o dashboard
     return (
-        <div className="App main-app"> {/* Usando main-app para evitar conflito com App.css global se houver */}
+        <div className="App main-app">
             <header className="app-header">
                 <img src={logo} alt="OneSid Logo" className="logo" />
                 <div className="user-info">
-                    {/* Exibe o username do objeto currentUser */}
                     <span>Olá, {currentUser?.username || 'Usuário'}</span>
                     <button onClick={handleLogout} className="logout-button">Sair</button>
                 </div>
             </header>
             <main>
-                {/* Mostra erro global se houver */}
-                {error && <p className="form-message error" style={{ textAlign: 'center', marginBottom: '1rem' }}>{error}</p>}
-
-                {/* Formulário para adicionar novas solicitações */}
-                <SolicitacaoForm onSolicitacaoCriada={handleSolicitacaoCriada} />
-
-                {/* Tabela de solicitações existentes */}
-                <SolicitacoesTable solicitacoes={solicitacoes} />
+                {error && <p className="global-error-message">{error}</p>}
+                <SolicitacaoForm onSolicitacaoCriada={handleDataNeedsRefresh} />
+                <SolicitacoesTable 
+                    solicitacoes={solicitacoes} 
+                    onDataRefresh={handleDataNeedsRefresh} 
+                />
             </main>
         </div>
     );
