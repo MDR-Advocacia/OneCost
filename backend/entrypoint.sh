@@ -92,26 +92,23 @@ try:
     robot_pass = os.getenv('ROBOT_PASSWORD')
 
     print(f"[Entrypoint-PY] Verificando usuário robô: '{robot_user}'")
-    if not robot_pass:
-        print("[Entrypoint-PY] ERRO: ROBOT_PASSWORD não definida no ambiente/arquivo .env. Não é possível criar/verificar usuário robô.")
-        exit_code = 1 # Define erro, mas continua para talvez o admin funcionar
+    user_exists = db.query(User).filter(User.username == robot_user).first()
+    if not user_exists:
+        print(f"[Entrypoint-PY] Criando usuário '{robot_user}' com role 'admin'...") # <-- MUDANÇA NA MENSAGEM
+        hashed_password = get_password_hash(robot_pass)
+        # Robô agora é criado com role 'admin' e ativo
+        db_user = User(username=robot_user, hashed_password=hashed_password, role='admin', is_active=True) # <-- MUDANÇA AQUI
+        db.add(db_user)
+        db.commit()
+        print(f"[Entrypoint-PY] Usuário '{robot_user}' criado com role 'admin'.")
+    elif user_exists.role != 'admin' or not user_exists.is_active: # Garante que seja admin e ativo
+        print(f"[Entrypoint-PY] Usuário robô '{robot_user}' existe, garantindo role 'admin' e status 'active'...")
+        user_exists.role = 'admin' 
+        user_exists.is_active = True
+        db.commit()
+        print(f"[Entrypoint-PY] Usuário robô '{robot_user}' atualizado para role 'admin' e is_active=True.")
     else:
-        user_exists = db.query(User).filter(User.username == robot_user).first()
-        if not user_exists:
-            print(f"[Entrypoint-PY] Criando usuário '{robot_user}' com role 'user'...")
-            hashed_password = get_password_hash(robot_pass)
-            # Robô é criado com role 'user' e ativo por padrão
-            db_user = User(username=robot_user, hashed_password=hashed_password, role='user', is_active=True)
-            db.add(db_user)
-            db.commit()
-            print(f"[Entrypoint-PY] Usuário '{robot_user}' criado.")
-        elif not user_exists.is_active:
-             # Garante que o robô esteja ativo se já existir
-             print(f"[Entrypoint-PY] Ativando usuário robô existente '{robot_user}'.")
-             user_exists.is_active = True
-             db.commit()
-        else:
-            print(f"[Entrypoint-PY] Usuário '{robot_user}' já existe e está ativo.")
+        print(f"[Entrypoint-PY] Usuário '{robot_user}' já existe com role 'admin' e está ativo.")
 
 except Exception as e:
     print(f"[Entrypoint-PY] ERRO durante criação/verificação de usuários: {e}")

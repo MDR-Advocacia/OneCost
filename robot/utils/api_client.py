@@ -97,9 +97,35 @@ def robot_login(username: str, password: str) -> bool:
                   log.error(f"Não foi possível decodificar a resposta de erro da API (status {e.response.status_code}): {e.response.text}")
         return False
 
-# (A função resetar_solicitacoes_com_erro() foi removida/comentada no main.py, 
-# mas pode ser mantida aqui para uso futuro, se necessário)
-# def resetar_solicitacoes_com_erro() -> bool: ...
+# ----- FUNÇÃO RESTAURADA -----
+def resetar_solicitacoes_com_erro() -> bool:
+    """Chama o endpoint para resetar solicitações com erro para Pendente."""
+    reset_url = f"{API_BASE_URL}/solicitacoes/resetar-erros"
+    headers = _get_auth_headers()
+    if not _api_token:
+        log.error("Não é possível resetar erros: Robô não autenticado (token ausente).")
+        return False
+
+    log.info(f"Chamando endpoint para resetar solicitações com erro em {reset_url}...")
+    try:
+        response = requests.post(reset_url, headers=headers, timeout=15) # Timeout um pouco maior para esta operação
+        response.raise_for_status()
+        log.info(f"Resposta do reset de erros: {response.json().get('message', 'Status OK')}")
+        return True
+    except requests.exceptions.RequestException as e:
+        log.error(f"Erro ao chamar API para resetar erros ({reset_url}): {e}")
+        if e.response is not None:
+             try:
+                 error_detail = e.response.json()
+                 # Verifica se é erro de permissão (403 Forbidden)
+                 if e.response.status_code == 403:
+                     log.error(f"Erro 403: Permissão negada para resetar erros. Verifique se o usuário '{ROBOT_USERNAME}' tem role 'admin'. Detalhe: {error_detail}")
+                 else:
+                     log.error(f"Detalhes do erro da API (status {e.response.status_code}): {error_detail}")
+             except json.JSONDecodeError:
+                  log.error(f"Não foi possível decodificar a resposta de erro da API (status {e.response.status_code}): {e.response.text}")
+        return False
+# ----- FIM DA FUNÇÃO RESTAURADA -----
 
 
 def get_proxima_solicitacao_pendente() -> Optional[Dict[str, Any]]:
@@ -132,13 +158,13 @@ def get_proxima_solicitacao_pendente() -> Optional[Dict[str, Any]]:
                   log.error(f"Não foi possível decodificar a resposta de erro da API (status {e.response.status_code}): {e.response.text}")
         return None
 
-# *** NOVA FUNÇÃO ***
+# *** NOVA FUNÇÃO *** (Já estava presente, mantida)
 def get_todas_solicitacoes_pendentes() -> List[Dict[str, Any]]:
     """Busca TODAS as solicitações com status 'Pendente'."""
     get_url = f"{API_BASE_URL}/solicitacoes/"
     # Busca por status "Pendente" e um limite alto (ex: 500)
     # O ideal seria paginar, mas para este caso, um limite alto resolve.
-    params = {"status_robo": "Pendente", "limit": 500} 
+    params = {"status_robo": "Pendente", "limit": 500}
     headers = _get_auth_headers()
     if not _api_token:
         log.error("Não é possível buscar solicitações: Robô não autenticado (token ausente).")
@@ -184,7 +210,7 @@ def update_solicitacao_na_api(solicitacao_id: int, payload: Dict[str, Any]) -> b
             payload_limpo[k] = v
         elif v is not None: # Ignora outros Nones
             payload_limpo[k] = v
-    
+
     # Garante que comprovantes_path seja uma lista de strings, se existir e não for None
     if 'comprovantes_path' in payload_limpo and payload_limpo['comprovantes_path'] is not None:
         if isinstance(payload_limpo['comprovantes_path'], list):

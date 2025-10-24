@@ -14,22 +14,27 @@ try:
     if str(robot_dir) not in sys.path:
         sys.path.insert(0, str(robot_dir))
 except NameError:
+    # Fallback se __file__ não estiver definido (menos comum)
     sys.path.insert(0, str(Path.cwd()))
 # --- Fim do bloco ---
 
 try:
+    # Importações de configuração
     from config import (
         URL_PORTAL_CUSTAS, LOG_DIR, ROBOT_USERNAME, ROBOT_PASSWORD,
         API_BASE_URL, SESSION_TIMEOUT_SECONDS
     )
+    # Importações dos módulos core
     from core.browser_manager import realizar_login_automatico
     from core.custos_manager import processar_solicitacao_especifica
-    from utils.api_client import (
-        get_todas_solicitacoes_pendentes, # <-- MUDANÇA: Busca todas
-        update_solicitacao_na_api,
-        robot_login
-    )
     from core.session_manager import SessionExpiredError, refresh_session_if_needed
+    # Importações do cliente da API
+    from utils.api_client import (
+        get_todas_solicitacoes_pendentes, # Busca todas as pendentes
+        update_solicitacao_na_api,
+        robot_login,
+        resetar_solicitacoes_com_erro # Função de reset agora importada
+    )
 except ModuleNotFoundError as e:
     print("="*80); print(f"ERRO DE IMPORTAÇÃO (ModuleNotFoundError): {e}"); print(f"sys.path: {sys.path}"); print("="*80); sys.exit(1)
 except ImportError as e:
@@ -37,19 +42,33 @@ except ImportError as e:
 
 
 # --- Configuração de Log Dinâmico ---
+# Garante que o diretório de logs exista
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 log_filename = f"onecost_robot_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
 log_filepath = LOG_DIR / log_filename
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+# Formato do Log
 log_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s - %(message)s')
+
+# Configuração do Logger Raiz
 root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
-for handler in root_logger.handlers[:]: root_logger.removeHandler(handler)
+root_logger.setLevel(logging.INFO) # Define o nível de log padrão
+
+# Remove handlers existentes para evitar duplicação (importante em reexecuções)
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+
+# Handler para arquivo
 file_handler = logging.FileHandler(log_filepath, encoding='utf-8')
 file_handler.setFormatter(log_formatter)
 root_logger.addHandler(file_handler)
+
+# Handler para console (stdout)
 stream_handler = logging.StreamHandler(sys.stdout)
 stream_handler.setFormatter(log_formatter)
 root_logger.addHandler(stream_handler)
+
+# Logger específico para este módulo
 log = logging.getLogger(__name__)
 
 log.info("Configuracao de logging concluida com sucesso.")
@@ -61,158 +80,184 @@ def main():
     log.info(f"INICIANDO ROBO ONECOST | LOG: {log_filename}")
     log.info("=" * 60)
 
+    # Código de saída geral do script (0 = sucesso, 1 = erro)
     general_exit_code = 0
-    processed_count = 0
-    solicitacoes_para_processar = [] # Lista de solicitações
-    
-    # Variáveis do Navegador
+    processed_count = 0 # Contador de solicitações processadas com sucesso
+    solicitacoes_para_processar = [] # Lista para armazenar as solicitações pendentes
+
+    # Variáveis para gerenciar o navegador Playwright
     browser = None
     context = None
     page = None
-    browser_process_ref = None
-    session_start_time = 0.0
+    browser_process_ref = None # Referência ao processo do Chrome iniciado
+    session_start_time = 0.0 # Timestamp do início da sessão atual do portal
 
     try:
-        # FASE -1: Autenticar Robô na API
+        # FASE -1: Autenticar Robô na API Backend
         log.info("FASE -1: Autenticando robô na API...")
         if not robot_login(ROBOT_USERNAME, ROBOT_PASSWORD):
+            # Se o login na API falhar, não adianta continuar
             log.critical("Falha ao autenticar robô na API. Encerrando.")
-            sys.exit(1)
+            sys.exit(1) # Sai com código de erro
 
-        # FASE -0.5: Resetar Erros (Comentado)
-        log.info("FASE -0.5: Verificando reset de erros (desativado temporariamente)...")
-        log.warning("Reset de erros desativado. Usuário 'robot' precisa de permissão de admin para esta função.")
-        
-        # FASE 0: Buscar TODAS as Solicitações Pendentes
+        # FASE -0.5: Resetar Solicitações com Erro (Agora Ativo)
+        log.info("FASE -0.5: Tentando resetar solicitações com status de erro...")
+        if resetar_solicitacoes_com_erro():
+             log.info("[SUCESSO] Solicitações com erro resetadas para 'Pendente' (se houveram).")
+        else:
+             # Apenas avisa, mas continua a execução. O erro específico já foi logado pelo api_client.
+             log.warning("Falha ao resetar erros ou nenhuma solicitação com erro encontrada. Verifique os logs da API se a falha persistir.")
+
+        # FASE 0: Buscar TODAS as Solicitações Pendentes na API
         log.info("FASE 0: Buscando TODAS as solicitações pendentes na API...")
         solicitacoes_para_processar = get_todas_solicitacoes_pendentes()
 
+        # Se não houver solicitações, encerra o ciclo com sucesso
         if not solicitacoes_para_processar:
             log.info("Nenhuma solicitação pendente para processar. Encerrando ciclo.")
             sys.exit(0) # Sai com sucesso
 
         log.info(f"Encontradas {len(solicitacoes_para_processar)} solicitações pendentes para processar.")
 
-        # Inicia o Playwright UMA VEZ
+        # Inicia o Playwright (gerenciador de contexto garante fechamento)
         with sync_playwright() as playwright:
-            # FASE 1: Login no Portal UMA VEZ
+            # FASE 1: Login no Portal (Apenas uma vez no início)
             log.info("FASE 1: Realizando login inicial no portal via CDP/Extensão...")
+            # A função `realizar_login_automatico` retorna os objetos do browser, contexto, referência do processo e a página logada
             browser, context, browser_process_ref, page = realizar_login_automatico(playwright)
-            session_start_time = time.time()
+            session_start_time = time.time() # Marca o início da sessão do portal
             log.info("[SUCESSO] Login inicial realizado.")
 
-            # FASE 2: Navegar para a Página de Custas UMA VEZ
+            # FASE 2: Navegar para a Página de Custas (Apenas uma vez no início)
             log.info(f"FASE 2: Navegando para a página inicial de Custas: {URL_PORTAL_CUSTAS}")
             page.goto(URL_PORTAL_CUSTAS)
             log.info("Aguardando carregamento inicial da página de custos...")
+            # Espera por elementos chave da página para garantir que carregou
             page.wait_for_selector("input#npj, button:has-text('Limpar')", timeout=60000)
-            page.wait_for_load_state("domcontentloaded", timeout=60000)
+            page.wait_for_load_state("domcontentloaded", timeout=60000) # Espera o DOM estar pronto
             log.info("[SUCESSO] Página de Custas carregada!")
 
-            # MUDANÇA: Loop FOR em vez de WHILE TRUE
+            # Loop principal: Processa cada solicitação encontrada
             for solicitacao_atual in solicitacoes_para_processar:
                 log.info("-" * 40)
                 solicitacao_id = solicitacao_atual.get("id", "ID Desconhecido")
-                
-                # Verifica a sessão ANTES de processar
+
+                # --- Verificação/Renovação da Sessão ---
                 try:
+                    # Verifica se a sessão do portal expirou e tenta renovar se necessário
                     page, browser, context, browser_process_ref, session_start_time = refresh_session_if_needed(
                         playwright, page, browser, context, browser_process_ref, session_start_time, SESSION_TIMEOUT_SECONDS
                     )
                 except SessionExpiredError as e_sess:
+                     # Se a renovação falhar, é um erro crítico para o ciclo atual
                      log.critical(f"Erro CRÍTICO ao tentar renovar a sessão no meio do loop: {e_sess}", exc_info=True)
-                     general_exit_code = 1
-                     break # Sai do loop FOR
+                     general_exit_code = 1 # Marca o ciclo geral como falha
+                     break # Interrompe o loop FOR, não processa mais solicitações
                 except Exception as e_refresh:
+                    # Outro erro inesperado durante a renovação
                     log.critical(f"Erro inesperado durante a renovação da sessão: {e_refresh}", exc_info=True)
                     general_exit_code = 1
-                    break # Sai do loop FOR
+                    break # Interrompe o loop FOR
 
+                # --- Processamento da Solicitação Individual ---
                 log.info(f"Processando Solicitação ID {solicitacao_id} (NPJ: {solicitacao_atual.get('npj', 'N/A')})...")
+
+                # Converte o valor para Decimal (necessário para comparações precisas)
                 try:
                     solicitacao_atual['valor'] = Decimal(str(solicitacao_atual.get('valor', '0.0')))
                 except InvalidOperation:
                     log.error(f"Valor inválido na solicitação ID {solicitacao_id}. Usando 0.0.")
                     solicitacao_atual['valor'] = Decimal("0.0")
 
-                # --- Bloco de Processamento de Uma Solicitação ---
-                resultado_processamento = None
+                # Bloco try/except para o processamento de UMA solicitação
+                resultado_processamento = None # Reseta o resultado para esta iteração
                 try:
-                    # Garante que a página esteja visível
+                    # Garante que a página do portal esteja em primeiro plano
                     page.bring_to_front()
+
+                    # Verifica se a URL ainda é a da página de custos (pode ter redirecionado)
                     if "custos.app.html" not in page.url:
                         log.warning(f"URL atual ({page.url}) não é a esperada. Navegando novamente para Custas...")
                         page.goto(URL_PORTAL_CUSTAS)
+                        # Re-espera pelos elementos chave
                         page.wait_for_selector("input#npj, button:has-text('Limpar')", timeout=45000)
                         page.wait_for_load_state("domcontentloaded", timeout=60000)
                         log.info("Página de Custas recarregada.")
 
-                    # FASE 3: Processar a Custa Específica
+                    # FASE 3: Chama a função que processa a custa específica
                     log.info(f"FASE 3 (ID {solicitacao_id}): Iniciando processamento da custa...")
                     resultado_processamento = processar_solicitacao_especifica(page, solicitacao_atual)
-                    log.info(f"Processamento da solicitação ID {solicitacao_id} concluído com status: {resultado_processamento.get('status_robo_final', 'Desconhecido')}")
-                    
-                    if "erro" in resultado_processamento.get("status_robo_final", "").lower():
-                        general_exit_code = 1 # Se qualquer item falhar, o ciclo geral é de erro
+                    status_final = resultado_processamento.get('status_robo_final', 'Desconhecido')
+                    log.info(f"Processamento da solicitação ID {solicitacao_id} concluído com status: {status_final}")
+
+                    # Verifica se o processamento individual resultou em erro
+                    if "erro" in status_final.lower():
+                        general_exit_code = 1 # Marca o ciclo geral como erro
                     else:
-                        processed_count += 1
+                        processed_count += 1 # Incrementa contador de sucesso
 
                 except (PlaywrightError, SessionExpiredError) as e:
+                    # Erros específicos do Playwright ou de sessão durante o processamento
                     log.critical(f"Erro (Playwright/Sessão) ao processar ID {solicitacao_id}: {e}", exc_info=False)
-                    log.debug("Stack trace completo do erro:", exc_info=True)
+                    log.debug("Stack trace completo do erro:", exc_info=True) # Log detalhado no modo debug
                     general_exit_code = 1
+                    # Garante que haja um resultado para enviar à API, marcando como erro
                     if not resultado_processamento:
                          resultado_processamento = {"solicitacao_id": solicitacao_id, "status_robo_final": f"Erro Processamento: {type(e).__name__}"}
-                    session_start_time = 0 # Força renovação na próxima iteração
+                    session_start_time = 0 # Força a verificação/renovação da sessão na próxima iteração
                 except Exception as e:
+                    # Captura qualquer outro erro inesperado durante o processamento
                     log.critical(f"Falha crítica inesperada ao processar ID {solicitacao_id}.", exc_info=True)
                     general_exit_code = 1
                     if not resultado_processamento:
                          resultado_processamento = {"solicitacao_id": solicitacao_id, "status_robo_final": f"Erro Critico Inesperado: {type(e).__name__}"}
                 finally:
+                    # --- FASE 4: Atualiza o Status na API (SEMPRE tenta, mesmo em erro) ---
                     log.info(f"### Bloco finally para solicitação ID {solicitacao_id} ###")
-                    # FASE 4: Atualizar Status na API
                     if resultado_processamento and "solicitacao_id" in resultado_processamento:
-                        sol_id = resultado_processamento["solicitacao_id"]
-                        log.info(f"FASE 4 (ID {sol_id}): Tentando atualizar status na API...")
+                        sol_id_final = resultado_processamento["solicitacao_id"]
+                        log.info(f"FASE 4 (ID {sol_id_final}): Tentando atualizar status na API...")
+                        # Monta o payload com os dados retornados pelo processamento
                         payload_api = {
                             "status_robo": resultado_processamento.get("status_robo_final", "Erro: Status Desconhecido"),
                             "status_portal": resultado_processamento.get("status_portal_encontrado"),
-                            "comprovantes_path": [str(p) for p in resultado_processamento.get("lista_arquivos_baixados", []) if p],
-                            "numero_processo": resultado_processamento.get("numero_processo_completo")
+                            "comprovantes_path": [str(p) for p in resultado_processamento.get("lista_arquivos_baixados", []) if p], # Garante strings e remove vazios
+                            "numero_processo": resultado_processamento.get("numero_processo_completo"),
+                            "usuario_confirmacao_id": resultado_processamento.get("usuario_confirmacao_id") # Inclui ID se o robô confirmou
                         }
-                        if resultado_processamento.get("usuario_confirmacao_id"):
-                            payload_api["usuario_confirmacao_id"] = resultado_processamento["usuario_confirmacao_id"]
 
-                        log.debug(f"Payload para API (ID {sol_id}): {json.dumps(payload_api, default=str)}")
-                        if not update_solicitacao_na_api(sol_id, payload_api):
-                            log.error(f"[ERRO] Falha ao atualizar solicitação ID {sol_id} na API.")
-                            general_exit_code = 1
+                        log.debug(f"Payload para API (ID {sol_id_final}): {json.dumps(payload_api, default=str)}")
+                        # Chama a função do api_client para atualizar
+                        if not update_solicitacao_na_api(sol_id_final, payload_api):
+                            log.error(f"[ERRO] Falha ao atualizar solicitação ID {sol_id_final} na API.")
+                            general_exit_code = 1 # Marca erro se a atualização falhar
                         else:
-                            log.info(f"[SUCESSO] Solicitação ID {sol_id} atualizada na API.")
+                            log.info(f"[SUCESSO] Solicitação ID {sol_id_final} atualizada na API.")
                     else:
+                        # Caso não haja resultado (erro muito inicial no processamento)
                         log.error(f"Não houve resultado do processamento para ID {solicitacao_id}. Não foi possível atualizar a API.")
                         general_exit_code = 1
-                
-                log.info(f"Fim do processamento da solicitação ID {solicitacao_id}.")
-                time.sleep(1) # Pausa entre solicitações
-            
-            # Fim do loop FOR
-            log.info(f"Fim do loop de processamento. {processed_count}/{len(solicitacoes_para_processar)} processadas sem erro.")
 
-    # Captura erros que podem ocorrer fora do loop (login inicial, busca inicial)
+                log.info(f"Fim do processamento da solicitação ID {solicitacao_id}.")
+                time.sleep(1) # Pequena pausa entre o processamento de cada solicitação
+
+            # Fim do loop FOR que itera sobre as solicitações
+            log.info(f"Fim do loop de processamento. {processed_count}/{len(solicitacoes_para_processar)} processadas sem erro neste ciclo.")
+
+    # Captura erros que podem ocorrer *antes* do loop principal (login, busca inicial)
     except (PlaywrightError, ConnectionError, FileNotFoundError, SessionExpiredError) as e:
-        log.critical(f"Erro CRÍTICO durante inicialização/login: {e}", exc_info=True)
+        log.critical(f"Erro CRÍTICO durante inicialização/login do robô: {e}", exc_info=True)
         general_exit_code = 1
-        # Se falhou, não há solicitações para marcar como erro
     except Exception as e:
+        # Captura qualquer outro erro não previsto
         log.critical("Falha crítica inesperada GERAL.", exc_info=True)
         general_exit_code = 1
     finally:
+        # --- FASE 5: Encerramento Final (SEMPRE executa) ---
         log.info("### Bloco finally GERAL ###")
-        # FASE 5: Encerramento FINAL do Navegador
         log.info("FASE 5: Encerrando a sessão final do navegador e processos...")
-        
+
+        # Tenta fechar a página, contexto e browser do Playwright de forma segura
         if 'page' in locals() and page and not page.is_closed():
             try: page.close()
             except Exception as e_close_page: log.warning(f"Erro ao fechar página final: {e_close_page}")
@@ -225,20 +270,22 @@ def main():
                 log.info("Browser final do Playwright fechado.")
             except Exception as e_br: log.warning(f"Erro ao fechar o browser final: {e_br}")
 
-        # Garante que o processo do Chrome seja finalizado
+        # Garante que o processo do Chrome iniciado seja finalizado
         proc = browser_process_ref.get('process') if browser_process_ref else None
-        if proc and proc.poll() is None:
+        if proc and proc.poll() is None: # Verifica se o processo ainda está rodando
             log.info(f"Tentando finalizar processo final do Chrome (PID: {proc.pid})...")
             try:
+                # Usa TASKKILL no Windows, terminate/kill em outros sistemas
                 if sys.platform == "win32":
                     subprocess.run(f"TASKKILL /F /PID {proc.pid} /T", shell=True, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 else:
-                    proc.terminate(); time.sleep(0.5)
-                    if proc.poll() is None: proc.kill()
+                    proc.terminate(); time.sleep(0.5) # Tenta terminar gentilmente primeiro
+                    if proc.poll() is None: proc.kill() # Força se ainda estiver rodando
                 log.info("Processo final do Chrome finalizado.")
             except Exception as e_kill:
                 log.warning(f"Não foi possível finalizar o processo final do Chrome (PID: {proc.pid}): {e_kill}")
 
+        # Mensagem final indicando sucesso ou erro geral
         log.info("=" * 60)
         total_encontradas = len(solicitacoes_para_processar)
         if general_exit_code == 0:
@@ -249,10 +296,10 @@ def main():
         else:
             log.error(f"ROBO ONECOST FINALIZADO COM ERRO (processou {processed_count}/{total_encontradas} solicitações, mas houve falha)")
         log.info("=" * 60)
+        # Sai do script Python com o código de status apropriado
         sys.exit(general_exit_code)
 
-# --- Ponto de Entrada ---
+# --- Ponto de Entrada Padrão do Script ---
 if __name__ == "__main__":
     print("[main.py] Bloco __main__ iniciado. Chamando a funcao main()...")
     main()
-
