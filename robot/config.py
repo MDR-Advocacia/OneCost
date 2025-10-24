@@ -4,13 +4,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # --- Configuração de Logging Inicial ---
-# Configura o logging básico o mais cedo possível
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s - %(message)s')
-log = logging.getLogger(__name__) # Cria um logger específico para este módulo
+log = logging.getLogger(__name__)
 
 # --- Carregar Variáveis de Ambiente ---
 try:
-    # Procura pelo .env na pasta raiz do projeto (OneCost-1)
     dotenv_path = Path(__file__).resolve().parent.parent / '.env'
     log.info(f"Tentando carregar .env de: {dotenv_path}")
     if dotenv_path.exists():
@@ -24,15 +22,10 @@ except Exception as e:
 # --- Constantes de Configuração ---
 
 # Diretórios
-# BASE_DIR agora aponta para a raiz do projeto (OneCost-1)
-# para consistência com o que `browser_manager` espera.
 BASE_DIR = Path(__file__).resolve().parent.parent
-ROBOT_DIR = BASE_DIR / "robot" # Diretório específico do robô
-
+ROBOT_DIR = BASE_DIR / "robot"
 COMPROVANTES_DIR = BASE_DIR / "comprovantes"
-# CORREÇÃO: SCRIPTS_DIR definido corretamente usando BASE_DIR
 SCRIPTS_DIR = BASE_DIR / "scripts"
-# CORREÇÃO: Nome correto da variável LOG_DIR e caminho relativo ao ROBOT_DIR
 LOG_DIR = ROBOT_DIR / "logs"
 
 # Cria os diretórios se não existirem
@@ -66,9 +59,15 @@ log.info(f"Usando CHROME_USER_DATA_DIR: {CHROME_USER_DATA_DIR}")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8001") # Corresponde ao docker-compose
 log.info(f"Usando API_BASE_URL: {API_BASE_URL}")
 
+# *** NOVO: Tempo limite da sessão do portal em segundos ***
+# Define quanto tempo a sessão do portal deve durar antes de forçar um novo login.
+# Exemplo: 30 minutos = 1800 segundos. Ajuste conforme necessário.
+SESSION_TIMEOUT_SECONDS = int(os.getenv("SESSION_TIMEOUT_SECONDS", "1800")) # Padrão 30 minutos
+log.info(f"Usando SESSION_TIMEOUT_SECONDS: {SESSION_TIMEOUT_SECONDS}s")
+
+
 # Verifica se os diretórios essenciais foram criados (apenas loga)
 if not LOG_DIR.exists():
      log.error(f"Falha ao verificar/criar diretório de logs: {LOG_DIR}")
 if not SCRIPTS_DIR.exists():
      log.warning(f"Diretório de scripts não encontrado: {SCRIPTS_DIR}")
-

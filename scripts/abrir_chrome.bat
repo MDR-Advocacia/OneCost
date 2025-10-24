@@ -1,12 +1,21 @@
 @echo off
-REM --- ATENÇÃO: Verifique e ajuste este caminho se necessário ---
+REM Este script nao e mais usado diretamente pelo browser_manager.py
+REM Mantido apenas como referencia ou para testes manuais.
+
+REM --- Caminho original fornecido ---
 set "CHROME_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe"
-set "PROFILE_PATH=%USERPROFILE%\chrome-dev-profile-onenotify"
+REM --- Perfil ---
+set "PROFILE_PATH=%USERPROFILE%\chrome-dev-profile-onecost"
 
-echo [🌐] Abrindo Google Chrome com depuracao remota...
-echo Usando perfil em: %PROFILE_PATH%
+echo [MANUAL] Verificando caminho: %CHROME_PATH%
+if not exist "%CHROME_PATH%" (
+    echo [!] ERRO: Caminho nao encontrado. Verifique a variavel CHROME_PATH.
+    pause
+    exit /b 1
+)
 
+echo [MANUAL] Abrindo Chrome com debug na porta 9222 e perfil %PROFILE_PATH%...
 start "" "%CHROME_PATH%" --remote-debugging-port=9222 --user-data-dir="%PROFILE_PATH%"
 
-echo [✔] Chrome aberto.
+echo [MANUAL] Comando enviado.
 
