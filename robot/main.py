@@ -82,7 +82,8 @@ def main():
 
     # Código de saída geral do script (0 = sucesso, 1 = erro)
     general_exit_code = 0
-    processed_count = 0 # Contador de solicitações processadas com sucesso
+    processed_count = 0 # Contador de solicitações processadas sem erro neste ciclo
+    processed_with_error_count = 0 # Contador de solicitações processadas COM erro neste ciclo
     solicitacoes_para_processar = [] # Lista para armazenar as solicitações pendentes
 
     # Variáveis para gerenciar o navegador Playwright
@@ -141,6 +142,7 @@ def main():
             for solicitacao_atual in solicitacoes_para_processar:
                 log.info("-" * 40)
                 solicitacao_id = solicitacao_atual.get("id", "ID Desconhecido")
+                solicitacao_npj = solicitacao_atual.get('npj', 'N/A') # Pega o NPJ para o log
 
                 # --- Verificação/Renovação da Sessão ---
                 try:
@@ -160,17 +162,20 @@ def main():
                     break # Interrompe o loop FOR
 
                 # --- Processamento da Solicitação Individual ---
-                log.info(f"Processando Solicitação ID {solicitacao_id} (NPJ: {solicitacao_atual.get('npj', 'N/A')})...")
+                log.info(f"Processando Solicitação ID {solicitacao_id} (NPJ: {solicitacao_npj})...")
 
                 # Converte o valor para Decimal (necessário para comparações precisas)
+                # Mantém uma cópia do valor original para o payload da API
+                valor_original_api = solicitacao_atual.get('valor')
                 try:
-                    solicitacao_atual['valor'] = Decimal(str(solicitacao_atual.get('valor', '0.0')))
+                    solicitacao_atual['valor_decimal_comparacao'] = Decimal(str(valor_original_api or '0.0'))
                 except InvalidOperation:
-                    log.error(f"Valor inválido na solicitação ID {solicitacao_id}. Usando 0.0.")
-                    solicitacao_atual['valor'] = Decimal("0.0")
+                    log.error(f"Valor inválido na solicitação ID {solicitacao_id}. Usando 0.0 para comparação.")
+                    solicitacao_atual['valor_decimal_comparacao'] = Decimal("0.0")
 
                 # Bloco try/except para o processamento de UMA solicitação
                 resultado_processamento = None # Reseta o resultado para esta iteração
+                status_final_para_api = "Erro: Falha no processamento interno" # Default em caso de erro antes de chamar custos_manager
                 try:
                     # Garante que a página do portal esteja em primeiro plano
                     page.bring_to_front()
@@ -186,63 +191,81 @@ def main():
 
                     # FASE 3: Chama a função que processa a custa específica
                     log.info(f"FASE 3 (ID {solicitacao_id}): Iniciando processamento da custa...")
+                    # Passa o dicionário original, mas o valor foi convertido para Decimal internamente se necessário
                     resultado_processamento = processar_solicitacao_especifica(page, solicitacao_atual)
-                    status_final = resultado_processamento.get('status_robo_final', 'Desconhecido')
-                    log.info(f"Processamento da solicitação ID {solicitacao_id} concluído com status: {status_final}")
+
+                    # Pega o status retornado pelo processamento
+                    status_final_para_api = resultado_processamento.get('status_robo', 'Erro: Status não retornado')
+                    log.info(f"Processamento da solicitação ID {solicitacao_id} concluído. Status retornado: '{status_final_para_api}'")
 
                     # Verifica se o processamento individual resultou em erro
-                    if "erro" in status_final.lower():
-                        general_exit_code = 1 # Marca o ciclo geral como erro
+                    if "erro" in status_final_para_api.lower():
+                        processed_with_error_count += 1 # Conta como processada COM erro
+                        # Não define general_exit_code = 1 aqui, pois o robô pode continuar
                     else:
-                        processed_count += 1 # Incrementa contador de sucesso
+                        processed_count += 1 # Incrementa contador de sucesso (sem erro)
 
                 except (PlaywrightError, SessionExpiredError) as e:
                     # Erros específicos do Playwright ou de sessão durante o processamento
                     log.critical(f"Erro (Playwright/Sessão) ao processar ID {solicitacao_id}: {e}", exc_info=False)
                     log.debug("Stack trace completo do erro:", exc_info=True) # Log detalhado no modo debug
-                    general_exit_code = 1
-                    # Garante que haja um resultado para enviar à API, marcando como erro
-                    if not resultado_processamento:
-                         resultado_processamento = {"solicitacao_id": solicitacao_id, "status_robo_final": f"Erro Processamento: {type(e).__name__}"}
+                    processed_with_error_count += 1
+                    status_final_para_api = f"Erro Processamento: {type(e).__name__}" # Define status de erro
                     session_start_time = 0 # Força a verificação/renovação da sessão na próxima iteração
                 except Exception as e:
                     # Captura qualquer outro erro inesperado durante o processamento
                     log.critical(f"Falha crítica inesperada ao processar ID {solicitacao_id}.", exc_info=True)
-                    general_exit_code = 1
-                    if not resultado_processamento:
-                         resultado_processamento = {"solicitacao_id": solicitacao_id, "status_robo_final": f"Erro Critico Inesperado: {type(e).__name__}"}
+                    processed_with_error_count += 1
+                    status_final_para_api = f"Erro Critico Inesperado: {type(e).__name__}" # Define status de erro
                 finally:
                     # --- FASE 4: Atualiza o Status na API (SEMPRE tenta, mesmo em erro) ---
                     log.info(f"### Bloco finally para solicitação ID {solicitacao_id} ###")
-                    if resultado_processamento and "solicitacao_id" in resultado_processamento:
-                        sol_id_final = resultado_processamento["solicitacao_id"]
-                        log.info(f"FASE 4 (ID {sol_id_final}): Tentando atualizar status na API...")
-                        # Monta o payload com os dados retornados pelo processamento
+
+                    # <<< CORREÇÃO AQUI >>>
+                    # Monta o payload COM BASE NO resultado_processamento se ele existir,
+                    # caso contrário, monta um payload de erro mínimo.
+                    payload_api = {}
+                    if resultado_processamento and isinstance(resultado_processamento, dict):
+                        log.info(f"FASE 4 (ID {solicitacao_id}): Montando payload com resultado do processamento...")
                         payload_api = {
-                            "status_robo": resultado_processamento.get("status_robo_final", "Erro: Status Desconhecido"),
-                            "status_portal": resultado_processamento.get("status_portal_encontrado"),
-                            "comprovantes_path": [str(p) for p in resultado_processamento.get("lista_arquivos_baixados", []) if p], # Garante strings e remove vazios
-                            "numero_processo": resultado_processamento.get("numero_processo_completo"),
-                            "usuario_confirmacao_id": resultado_processamento.get("usuario_confirmacao_id") # Inclui ID se o robô confirmou
+                            "status_robo": status_final_para_api, # Usa o status definido acima
+                            "status_portal": resultado_processamento.get("status_portal"),
+                            "comprovantes_path": resultado_processamento.get("comprovantes_path", []), # Pega a lista (ou vazia)
+                            "numero_processo": resultado_processamento.get("numero_processo"), # Pega o CNJ
+                            "especificacao": resultado_processamento.get("especificacao"), # Pega a especificação
+                            "usuario_confirmacao_id": resultado_processamento.get("usuario_confirmacao_id")
+                        }
+                    else:
+                        # Se resultado_processamento é None ou inválido (erro muito cedo)
+                        log.error(f"FASE 4 (ID {solicitacao_id}): Não houve resultado válido do processamento. Enviando status de erro.")
+                        payload_api = {
+                            "status_robo": status_final_para_api, # Envia o status de erro definido no except
+                            "status_portal": None,
+                            "comprovantes_path": [],
+                            "numero_processo": solicitacao_atual.get("numero_processo"), # Tenta manter o do BD se tiver
+                            "especificacao": solicitacao_atual.get("especificacao"), # Tenta manter o do BD se tiver
+                            "usuario_confirmacao_id": None
                         }
 
-                        log.debug(f"Payload para API (ID {sol_id_final}): {json.dumps(payload_api, default=str)}")
-                        # Chama a função do api_client para atualizar
-                        if not update_solicitacao_na_api(sol_id_final, payload_api):
-                            log.error(f"[ERRO] Falha ao atualizar solicitação ID {sol_id_final} na API.")
-                            general_exit_code = 1 # Marca erro se a atualização falhar
-                        else:
-                            log.info(f"[SUCESSO] Solicitação ID {sol_id_final} atualizada na API.")
+                    log.debug(f"Payload final para API (ID {solicitacao_id}): {json.dumps(payload_api, default=str)}")
+
+                    # Chama a função do api_client para atualizar
+                    if not update_solicitacao_na_api(solicitacao_id, payload_api):
+                        log.error(f"[ERRO] Falha ao atualizar solicitação ID {solicitacao_id} na API.")
+                        # Não define general_exit_code aqui para não parar o robô por falha de API
                     else:
-                        # Caso não haja resultado (erro muito inicial no processamento)
-                        log.error(f"Não houve resultado do processamento para ID {solicitacao_id}. Não foi possível atualizar a API.")
-                        general_exit_code = 1
+                        log.info(f"[SUCESSO] Solicitação ID {solicitacao_id} atualizada na API.")
+                    # <<< FIM DA CORREÇÃO >>>
 
                 log.info(f"Fim do processamento da solicitação ID {solicitacao_id}.")
                 time.sleep(1) # Pequena pausa entre o processamento de cada solicitação
 
             # Fim do loop FOR que itera sobre as solicitações
-            log.info(f"Fim do loop de processamento. {processed_count}/{len(solicitacoes_para_processar)} processadas sem erro neste ciclo.")
+            total_processadas = processed_count + processed_with_error_count
+            log.info(f"Fim do loop de processamento. {total_processadas}/{len(solicitacoes_para_processar)} solicitações tiveram tentativa de processamento ({processed_count} sem erro, {processed_with_error_count} com erro).")
+            # Define o código de saída geral baseado se *alguma* solicitação teve erro no processamento
+            if processed_with_error_count > 0:
+                 general_exit_code = 1
 
     # Captura erros que podem ocorrer *antes* do loop principal (login, busca inicial)
     except (PlaywrightError, ConnectionError, FileNotFoundError, SessionExpiredError) as e:
@@ -294,7 +317,8 @@ def main():
             else:
                  log.info("ROBO ONECOST FINALIZADO - Nenhuma solicitação pendente encontrada neste ciclo.")
         else:
-            log.error(f"ROBO ONECOST FINALIZADO COM ERRO (processou {processed_count}/{total_encontradas} solicitações, mas houve falha)")
+             # Atualiza a mensagem de erro para refletir o novo contador
+             log.error(f"ROBO ONECOST FINALIZADO COM ERRO (processou {processed_count}/{total_encontradas} sem erro, {processed_with_error_count} COM erro)")
         log.info("=" * 60)
         # Sai do script Python com o código de status apropriado
         sys.exit(general_exit_code)

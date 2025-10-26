@@ -100,6 +100,8 @@ class SolicitacaoCustaCreate(SolicitacaoCustaBase):
 class SolicitacaoCustaUpdate(BaseModel):
     status_portal: Optional[str] = None
     status_robo: Optional[str] = None
+    # --- NOVO CAMPO ---
+    especificacao: Optional[str] = None # Adicionado para o robô enviar
     # Recebe lista de strings ou None do robô/api
     comprovantes_path: Optional[List[str]] = None
     # Recebe float ou None, validado no endpoint
@@ -112,7 +114,7 @@ class SolicitacaoCustaUpdate(BaseModel):
     arquivar: Optional[bool] = None  # Flag para arquivar/desarquivar (usado no endpoint /archive)
 
     # Garante que strings vazias sejam None para campos opcionais de string
-    @field_validator('status_portal', 'status_robo', 'numero_processo', mode='before')
+    @field_validator('status_portal', 'status_robo', 'numero_processo', 'especificacao', mode='before') # Adicionado 'especificacao'
     @classmethod
     def empty_str_to_none(cls, v):
         return None if isinstance(v, str) and v.strip() == "" else v
@@ -130,12 +132,14 @@ class SolicitacaoCusta(SolicitacaoCustaBase):
     # Status e dados do robô
     status_portal: Optional[str] = None
     status_robo: Optional[str] = None
+    # --- NOVO CAMPO ---
+    especificacao: Optional[str] = None # Adicionado para enviar ao frontend
     ultima_verificacao_robo: Optional[datetime] = None
     comprovantes_path: Optional[List[str]] = None # Deveria ser lista na resposta
     # ID e objeto do usuário (robô) que confirmou
     usuario_confirmacao_id: Optional[int] = None
     usuario_confirmacao: Optional[User] = None
-    # ID e objeto do usuário que finalizou/tratou
+    # ID e objeto do usuário que finalizou/tratado
     usuario_finalizacao_id: Optional[int] = None
     usuario_finalizacao: Optional[User] = None
     data_finalizacao: Optional[datetime] = None
@@ -176,4 +180,3 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username: Optional[str] = None
-

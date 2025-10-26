@@ -151,4 +151,3 @@ export const updateUser = async (userId, userData) => {
 
 
 export default api;
-
