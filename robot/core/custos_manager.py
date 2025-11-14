@@ -83,9 +83,9 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
         "solicitacao_id": solicitacao_id,
         "numero_processo": numero_processo_bd, # Inicia com o valor do BD, será atualizado se encontrado
         "especificacao": None, # Campo para a especificação
-        "comprovantes_path": [], # Lista de caminhos relativos
+        "comprovantes_path": [], # Lista de caminhos relativos (NOME CORRETO PARA A API)
         "status_portal": None, # Status lido do portal (o último lido)
-        "status_robo": "Erro: Falha não especificada", # Status final para o OneCost
+        "status_robo": "Erro: Falha não especificada", # Status final para o OneCost (NOME CORRETO)
         "usuario_confirmacao_id": None, # ID do robô se ele confirmar
         "dados_custas_encontrados_debug": {} # Dados lidos da linha da tabela (mantido para logs/debug)
     }
@@ -101,6 +101,11 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
     especificacao_capturada = None # Variável para guardar a especificação da lista
     status_portal_inicial = None # Variável para guardar o status da lista
     valor_portal_texto_capturado = None # Variável para guardar o valor da lista
+
+    # --- CORREÇÃO DO BUG (UnboundLocalError) ---
+    # Inicializa a variável aqui para garantir que ela exista no 'finally'
+    voltar_para_lista_necessario = False
+    # ------------------------------------------
 
     try:
         # 1. Garantir que está na página certa e Limpar Busca
@@ -228,7 +233,7 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
                            logging.info(f"Atualizando número do processo no resultado para: {numero_processo_completo_detalhes}")
                            resultado_final["numero_processo"] = numero_processo_completo_detalhes
                  else:
-                     logging.warning("Elemento do número do processo (CNJ) encontrado, mas estava vazio.")
+                      logging.warning("Elemento do número do processo (CNJ) encontrado, mas estava vazio.")
             except PlaywrightTimeoutError:
                  logging.warning("Não foi possível encontrar/ler o elemento do número do processo (CNJ) completo na tela de detalhes.")
             except Exception as e:
@@ -319,17 +324,17 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
                     try:
                         documentos_section.locator("table").wait_for(state='visible', timeout=10000)
                     except PlaywrightTimeoutError:
-                         # Verifica se existe mensagem de "Nenhum documento" (ajustar seletor se necessário)
-                         if documentos_section.locator("text=/Nenhum documento encontrado/i").is_visible(timeout=1000):
-                              logging.info("Nenhum documento gerador encontrado nesta seção (mensagem explícita).")
-                         else:
-                              logging.warning("Tabela de documentos não encontrada e sem mensagem de 'nenhum documento'.")
+                        # Verifica se existe mensagem de "Nenhum documento" (ajustar seletor se necessário)
+                        if documentos_section.locator("text=/Nenhum documento encontrado/i").is_visible(timeout=1000):
+                            logging.info("Nenhum documento gerador encontrado nesta seção (mensagem explícita).")
+                        else:
+                            logging.warning("Tabela de documentos não encontrada e sem mensagem de 'nenhum documento'.")
 
                 links_download_docs = documentos_section.locator("td a[href*='/paj/resources/app/v0/processo/documento/download/']").all()
 
                 if not links_download_docs:
-                     # Log movido para dentro do bloco try/except acima
-                     pass # logging.info("Nenhum documento gerador encontrado nesta seção.")
+                    # Log movido para dentro do bloco try/except acima
+                    pass # logging.info("Nenhum documento gerador encontrado nesta seção.")
                 else:
                     logging.info(f"Encontrados {len(links_download_docs)} documento(s) gerador(es) para baixar.")
                     for i, link_doc in enumerate(links_download_docs):
@@ -409,7 +414,7 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
                          break
 
                 if not linha_alvo_confirm:
-                    raise Exception("Não foi possível reencontrar a linha na lista após voltar dos detalhes.")
+                     raise Exception("Não foi possível reencontrar a linha na lista após voltar dos detalhes.")
 
                 # Agora sim, inicia o fluxo de confirmação usando linha_alvo_confirm
                 logging.info(f"Iniciando fluxo de confirmação para ID {solicitacao_id}...")
@@ -475,8 +480,8 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
                                  input_npj_placeholder_check.clear()
                                  logging.info("Campo NPJ limpo diretamente para double-check.")
                              except Exception as e_clear_direct:
-                                  logging.error(f"Falha ao tentar limpar campo NPJ para double-check: {e_clear_direct}")
-                                  raise # Re-lança o erro
+                                   logging.error(f"Falha ao tentar limpar campo NPJ para double-check: {e_clear_direct}")
+                                   raise # Re-lança o erro
 
                         # Preenche NPJ novamente
                         input_npj_check = page.locator("#npj")
@@ -553,7 +558,7 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
             # <<< IMPORTANTE >>> O 'Voltar' agora será tratado no 'finally' geral
 
         # Atribui a lista de arquivos baixados (pode estar vazia)
-        resultado_final["comprovantes_path"] = lista_arquivos_baixados_custa # <<< AJUSTE >>> Nome do campo na API
+        resultado_final["comprovantes_path"] = lista_arquivos_baixados_custa
 
     # --- Tratamento de Erros Gerais ---
     except PlaywrightTimeoutError as e:
@@ -592,7 +597,7 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
              if page.locator("h3:has-text('Detalhar Custo')").is_visible(timeout=1000):
                   pass # Precisa voltar
              else:
-                  voltar_para_lista_necessario = False
+                   voltar_para_lista_necessario = False
         except:
              voltar_para_lista_necessario = False
 
@@ -614,7 +619,9 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
                  logging.error(f"Bloco Finally: Erro ao tentar voltar para a lista de custos: {e_voltar_finally}")
                  # Não fazer nada drástico aqui, apenas logar.
 
-    # Log final do processamento desta solicitação
+    # --- CORREÇÃO (custos_manager.py) ---
+    # Usa 'status_robo' ao invés de 'status_robo_final' no log
     logging.info(f"Processamento finalizado para ID {solicitacao_id}. Status Robô final: '{resultado_final['status_robo']}'. Status Portal (final): '{resultado_final['status_portal']}'. Especificação: '{resultado_final['especificacao']}'. Nº Processo: '{resultado_final['numero_processo']}'. Arquivos: {len(resultado_final['comprovantes_path'])}.")
+    # ------------------------------------
 
     return resultado_final

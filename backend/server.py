@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Query, Body
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
-from sqlalchemy import update
+from sqlalchemy import update, func
 from sqlalchemy.orm import Session, joinedload, selectinload
 from datetime import timedelta, datetime, date, timezone
 from typing import List, Optional
@@ -8,10 +8,13 @@ from decimal import Decimal, InvalidOperation
 import json
 import logging
 from pathlib import Path
-import re # Importar re para regex no CORS
+import re  # Importar re para regex no CORS
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
+# --- MUDANÇA 1: IMPORTAR A BIBLIOTECA CORRETA ---
+from prometheus_fastapi_instrumentator import Instrumentator
 
 import schemas
 from bd import models
@@ -28,12 +31,17 @@ log = logging.getLogger("server")
 
 app = FastAPI()
 
+# --- MUDANÇA 2: USAR O INSTRUMENTADOR ---
+# Isso instrumenta o app (conta requests, etc.) e já expõe a rota /metrics
+Instrumentator().instrument(app).expose(app)
+# --- FIM DAS MUDANÇAS ---
+
+
 # --- Configuração do CORS ---
-# Permite localhost e IPs na rede 192.168.50.x na porta 3001
-cors_regex = r"http://(localhost|127\.0\.0\.1|192\.168\.50\.\d{1,3}):3001"
+cors_regex = r"http://(localhost|127\.0\.0\.1|192\.168\.50\.\d{1,3}|192\.168\.0\.\d{1,3}):3001|http://onecost\.mdr\.local(:\d+)?"
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=cors_regex, # Usa regex
+    allow_origin_regex=cors_regex,  # Usa regex
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -265,10 +273,12 @@ def create_solicitacao(
         db.add(db_solicitacao)
         db.commit()
         db.refresh(db_solicitacao)
+        # Recarrega com relacionamentos para o retorno
         db_solicitacao_com_rel = db.query(models.SolicitacaoCusta).options(
-                selectinload(models.SolicitacaoCusta.usuario_criacao)
+                selectinload(models.SolicitacaoCusta.usuario_criacao) # Carrega o criador
             ).filter(models.SolicitacaoCusta.id == db_solicitacao.id).first()
         log.info(f"[POST /solicitacoes/] Solicitação ID {db_solicitacao.id} criada.")
+        # Retorna o objeto com o relacionamento carregado, ou o original se a recarga falhar
         return db_solicitacao_com_rel if db_solicitacao_com_rel else db_solicitacao
     except ValidationError as ve:
         log.error(f"[POST /solicitacoes/] Erro de validação: {ve}", exc_info=False)
@@ -281,110 +291,245 @@ def create_solicitacao(
 @app.get("/solicitacoes/", response_model=List[schemas.SolicitacaoCusta])
 async def read_solicitacoes(
     skip: int = 0, limit: int = 100,
-    status_robo: Optional[str] = Query(None), status_robo_ne: Optional[str] = Query(None),
+    status_robo: Optional[str] = Query(None),
+    status_robo_ne: Optional[str] = Query(None), # Para excluir status
     include_archived: bool = Query(False),
-    db: Session = Depends(get_db), current_user: models.User = Depends(get_current_active_user)
+    # NOVO: Filtro por usuário criador
+    usuario_id: Optional[int] = Query(None, description="Filtrar por ID do usuário criador"),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user)
 ):
-    """Lista solicitações."""
-    log.info(f"[GET /solicitacoes/] Buscando: skip={skip}, limit={limit}, status_robo={status_robo}, archived={include_archived} por '{current_user.username}'")
+    """Lista solicitações com filtros opcionais."""
+    log.info(f"[GET /solicitacoes/] Buscando: skip={skip}, limit={limit}, status_robo={status_robo}, status_robo_ne={status_robo_ne}, archived={include_archived}, usuario_id={usuario_id} por '{current_user.username}'")
+
+    # Regra de permissão para ver arquivadas
     if include_archived and current_user.role != 'admin':
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas admins podem ver arquivadas.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas admins podem ver solicitações arquivadas.")
+
     try:
+        # Eager load relationships to avoid N+1 queries
         query = db.query(models.SolicitacaoCusta).options(
-            selectinload('*') # Carrega todos relacionamentos
+            selectinload(models.SolicitacaoCusta.usuario_criacao),
+            selectinload(models.SolicitacaoCusta.usuario_confirmacao),
+            selectinload(models.SolicitacaoCusta.usuario_finalizacao),
+            selectinload(models.SolicitacaoCusta.usuario_arquivamento)
         )
+
+        # Aplica filtros
         if status_robo:
             status_list = [s.strip() for s in status_robo.split(',') if s.strip()]
-            if status_list: query = query.filter(models.SolicitacaoCusta.status_robo.in_(status_list))
+            if status_list:
+                query = query.filter(models.SolicitacaoCusta.status_robo.in_(status_list))
+
         if status_robo_ne:
             status_list_ne = [s.strip() for s in status_robo_ne.split(',') if s.strip()]
-            if status_list_ne: query = query.filter(models.SolicitacaoCusta.status_robo.notin_(status_list_ne))
+            if status_list_ne:
+                query = query.filter(models.SolicitacaoCusta.status_robo.notin_(status_list_ne))
+
+        # Filtro de arquivadas
         if not include_archived:
             query = query.filter(models.SolicitacaoCusta.is_archived == False)
+
+        # NOVO: Filtro por usuário
+        if usuario_id is not None:
+            # Verifica se o usuário tentando filtrar por outro ID é admin
+            if usuario_id != current_user.id and current_user.role != 'admin':
+                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas admins podem filtrar por outros usuários.")
+            query = query.filter(models.SolicitacaoCusta.usuario_criacao_id == usuario_id)
+
+        # Ordenação e paginação
         solicitacoes = query.order_by(models.SolicitacaoCusta.id.desc()).offset(skip).limit(limit).all()
-        log.info(f"[GET /solicitacoes/] Encontradas {len(solicitacoes)}.")
+        log.info(f"[GET /solicitacoes/] Encontradas {len(solicitacoes)} solicitações após filtros.")
         return solicitacoes
     except Exception as e:
-        log.error(f"[GET /solicitacoes/] Erro: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro interno.")
+        log.error(f"[GET /solicitacoes/] Erro interno ao buscar solicitações: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro interno ao buscar solicitações.")
+
 
 @app.put("/solicitacoes/{id}", response_model=schemas.SolicitacaoCusta)
 def update_solicitacao(
     id: int, solicitacao_update: schemas.SolicitacaoCustaUpdate,
     db: Session = Depends(get_db), current_user: models.User = Depends(get_current_active_user)
 ):
-    """Atualiza uma solicitação (robô ou finalizar)."""
-    log.info(f"[PUT /solicitacoes/{id}] Atualização por '{current_user.username}'.")
+    """Atualiza uma solicitação (usado pelo robô para status/arquivos e pelo usuário para finalizar)."""
+    log.info(f"[PUT /solicitacoes/{id}] Tentativa de atualização por usuário '{current_user.username}'. Dados: {solicitacao_update.model_dump(exclude_unset=True)}")
+
+    # Carrega a solicitação com relacionamentos para retorno
     db_solicitacao = db.query(models.SolicitacaoCusta).options(
-        selectinload('*')
+        selectinload(models.SolicitacaoCusta.usuario_criacao),
+        selectinload(models.SolicitacaoCusta.usuario_confirmacao),
+        selectinload(models.SolicitacaoCusta.usuario_finalizacao),
+        selectinload(models.SolicitacaoCusta.usuario_arquivamento)
     ).filter(models.SolicitacaoCusta.id == id).first()
 
-    if db_solicitacao is None: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Não encontrado")
-    if db_solicitacao.is_archived and solicitacao_update.finalizar: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Não pode finalizar arquivada.")
+    if db_solicitacao is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Solicitação não encontrada")
 
+    # Impede finalizar se já estiver arquivada
+    if db_solicitacao.is_archived and solicitacao_update.finalizar:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Não é possível finalizar uma solicitação arquivada.")
+
+    # Pega os dados enviados, excluindo as flags 'finalizar' e 'arquivar' que são tratadas separadamente
     update_data = solicitacao_update.model_dump(exclude_unset=True, exclude={'finalizar', 'arquivar'})
     updated = False
+
     try:
+        # Aplica atualizações dos campos vindos do robô ou outras fontes
         for key, value in update_data.items():
             current_value = getattr(db_solicitacao, key, None)
+
+            # Tratamento especial para 'valor' (comparar Decimal)
             if key == 'valor' and value is not None:
-                if isinstance(value, Decimal) and db_solicitacao.valor != value: setattr(db_solicitacao, key, value); updated = True
+                try:
+                    # Converte o valor recebido (float) para Decimal antes de comparar/atribuir
+                    decimal_value = schemas.validate_valor_input(value)
+                    if db_solicitacao.valor != decimal_value:
+                        setattr(db_solicitacao, key, decimal_value)
+                        updated = True
+                except ValueError:
+                    log.warning(f"Valor inválido recebido para atualização: {value}. Ignorando.")
+                continue # Pula para o próximo item do loop
+
+            # Atualiza numero_processo somente se estiver vazio e um novo valor for fornecido
+            if key == 'numero_processo' and value and not db_solicitacao.numero_processo:
+                setattr(db_solicitacao, key, value)
+                updated = True
                 continue
-            if key == 'numero_processo' and value and not db_solicitacao.numero_processo: setattr(db_solicitacao, key, value); updated = True; continue
-            if key == 'usuario_confirmacao_id' and value is not None and db_solicitacao.usuario_confirmacao_id is None: setattr(db_solicitacao, key, value); updated = True; continue
-            if hasattr(db_solicitacao, key) and current_value != value and key not in ['valor', 'numero_processo', 'usuario_confirmacao_id']: setattr(db_solicitacao, key, value); updated = True
 
-        if 'status_robo' in update_data: db_solicitacao.ultima_verificacao_robo = datetime.now(timezone.utc); updated = True
+            # Atualiza usuario_confirmacao_id apenas se ainda não estiver definido
+            if key == 'usuario_confirmacao_id' and value is not None and db_solicitacao.usuario_confirmacao_id is None:
+                setattr(db_solicitacao, key, value)
+                updated = True
+                continue
 
+            # Atualiza outros campos se existirem no modelo e o valor for diferente
+            if hasattr(db_solicitacao, key) and current_value != value and key not in ['valor', 'numero_processo', 'usuario_confirmacao_id']:
+                setattr(db_solicitacao, key, value)
+                updated = True
+
+        # Atualiza timestamp se status_robo foi modificado
+        if 'status_robo' in update_data:
+            db_solicitacao.ultima_verificacao_robo = datetime.now(timezone.utc)
+            updated = True # Garante que updated seja True
+
+        # --- Lógica de Finalização pelo Usuário ---
         now_utc = datetime.now(timezone.utc)
-        if not db_solicitacao.is_archived:
+        if not db_solicitacao.is_archived: # Só finaliza se não estiver arquivada
             if solicitacao_update.finalizar is True and db_solicitacao.usuario_finalizacao_id is None:
-                log.info(f"Usuário '{current_user.username}' finalizando ID {id}.")
-                db_solicitacao.usuario_finalizacao_id = current_user.id; db_solicitacao.data_finalizacao = now_utc; updated = True
+                log.info(f"Usuário '{current_user.username}' marcando solicitação ID {id} como finalizada (tratada).")
+                db_solicitacao.usuario_finalizacao_id = current_user.id
+                db_solicitacao.data_finalizacao = now_utc
+                updated = True
             elif solicitacao_update.finalizar is False and db_solicitacao.usuario_finalizacao_id is not None:
-                log.info(f"Usuário '{current_user.username}' desmarcando finalização ID {id}.")
-                db_solicitacao.usuario_finalizacao_id = None; db_solicitacao.data_finalizacao = None; updated = True
+                # Permitir "desfinalizar"? Por ora, não implementado, mas o log indica a tentativa.
+                log.warning(f"Usuário '{current_user.username}' tentou desmarcar finalização da ID {id} (ação não implementada).")
+                # Se fosse implementar:
+                # db_solicitacao.usuario_finalizacao_id = None
+                # db_solicitacao.data_finalizacao = None
+                # updated = True
 
-        if updated: db.commit(); db.refresh(db_solicitacao); log.info(f"[PUT /solicitacoes/{id}] Atualizada.")
-        else: log.info(f"[PUT /solicitacoes/{id}] Nenhuma alteração.")
+        # Se houve alguma alteração, commita
+        if updated:
+            db.commit()
+            db.refresh(db_solicitacao) # Recarrega o objeto com os dados atualizados do DB
+            # Precisamos recarregar as relações explicitamente após o refresh
+            db.refresh(db_solicitacao.usuario_criacao)
+            if db_solicitacao.usuario_confirmacao_id: db.refresh(db_solicitacao.usuario_confirmacao)
+            if db_solicitacao.usuario_finalizacao_id: db.refresh(db_solicitacao.usuario_finalizacao)
+            if db_solicitacao.usuario_arquivamento_id: db.refresh(db_solicitacao.usuario_arquivamento)
+            log.info(f"[PUT /solicitacoes/{id}] Solicitação atualizada com sucesso.")
+        else:
+            log.info(f"[PUT /solicitacoes/{id}] Nenhuma alteração detectada nos dados enviados.")
+
         return db_solicitacao
     except Exception as e:
-         db.rollback(); log.error(f"[PUT /solicitacoes/{id}] Erro: {e}", exc_info=True); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erro: {e}")
+         db.rollback()
+         log.error(f"[PUT /solicitacoes/{id}] Erro interno ao atualizar solicitação: {e}", exc_info=True)
+         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erro interno ao atualizar solicitação: {e}")
+
 
 @app.put("/solicitacoes/{id}/archive", response_model=schemas.SolicitacaoCusta, dependencies=[Depends(require_admin_role)])
 def archive_solicitacao(
-    id: int, archive_body: schemas.SolicitacaoCustaUpdate = Body(...),
+    id: int, archive_body: schemas.SolicitacaoCustaUpdate = Body(...), # Reutiliza schema, pegando só 'arquivar'
     db: Session = Depends(get_db), current_user: models.User = Depends(require_admin_role)
 ):
-    """Arquiva ou desarquiva uma solicitação (admin)."""
-    archive_status = archive_body.arquivar
-    if archive_status is None: raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="'arquivar' é obrigatório.")
-    log.info(f"[PUT /solicitacoes/{id}/archive] Admin '{current_user.username}' definindo is_archived={archive_status}.")
-    db_solicitacao = db.query(models.SolicitacaoCusta).options(selectinload('*')).filter(models.SolicitacaoCusta.id == id).first()
-    if db_solicitacao is None: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Não encontrado")
-    if db_solicitacao.is_archived == archive_status: return db_solicitacao
+    """Arquiva ou desarquiva uma solicitação (apenas admin)."""
+    archive_status = archive_body.arquivar # Pega o valor booleano do corpo
+    if archive_status is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="O campo 'arquivar' (true/false) é obrigatório no corpo da requisição.")
+
+    log.info(f"[PUT /solicitacoes/{id}/archive] Admin '{current_user.username}' solicitou definir is_archived={archive_status}.")
+
+    # Carrega solicitação com relacionamentos
+    db_solicitacao = db.query(models.SolicitacaoCusta).options(
+        selectinload('*') # Carrega tudo
+    ).filter(models.SolicitacaoCusta.id == id).first()
+
+    if db_solicitacao is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Solicitação não encontrada")
+
+    # Verifica se o status já é o desejado
+    if db_solicitacao.is_archived == archive_status:
+        log.info(f"[PUT /solicitacoes/{id}/archive] Solicitação já está no estado desejado (is_archived={archive_status}). Nenhuma alteração.")
+        return db_solicitacao # Retorna o estado atual sem fazer nada
+
     try:
-        db_solicitacao.is_archived = archive_status; now_utc = datetime.now(timezone.utc)
-        if archive_status: db_solicitacao.data_arquivamento = now_utc; db_solicitacao.usuario_arquivamento_id = current_user.id
-        else: db_solicitacao.data_arquivamento = None; db_solicitacao.usuario_arquivamento_id = None
-        db.commit(); db.refresh(db_solicitacao); log.info(f"[PUT /solicitacoes/{id}/archive] Status arquivado: {db_solicitacao.is_archived}.")
+        now_utc = datetime.now(timezone.utc)
+        db_solicitacao.is_archived = archive_status
+        if archive_status: # Se está arquivando
+            db_solicitacao.data_arquivamento = now_utc
+            db_solicitacao.usuario_arquivamento_id = current_user.id
+        else: # Se está desarquivando
+            db_solicitacao.data_arquivamento = None
+            db_solicitacao.usuario_arquivamento_id = None
+
+        db.commit()
+        db.refresh(db_solicitacao) # Recarrega do DB
+        # Recarrega relações
+        db.refresh(db_solicitacao.usuario_criacao)
+        if db_solicitacao.usuario_confirmacao_id: db.refresh(db_solicitacao.usuario_confirmacao)
+        if db_solicitacao.usuario_finalizacao_id: db.refresh(db_solicitacao.usuario_finalizacao)
+        if db_solicitacao.usuario_arquivamento_id: db.refresh(db_solicitacao.usuario_arquivamento)
+
+        log.info(f"[PUT /solicitacoes/{id}/archive] Status de arquivamento atualizado para: {db_solicitacao.is_archived}.")
         return db_solicitacao
-    except Exception as e: db.rollback(); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erro: {e}")
+    except Exception as e:
+        db.rollback()
+        log.error(f"[PUT /solicitacoes/{id}/archive] Erro interno: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erro interno ao atualizar arquivamento: {e}")
 
 @app.post("/solicitacoes/resetar-erros", status_code=status.HTTP_200_OK, dependencies=[Depends(require_admin_role)])
 def resetar_status_erro(db: Session = Depends(get_db), current_user: models.User = Depends(require_admin_role)):
-    """Reseta status de erro para 'Pendente' (admin)."""
-    log.info(f"[POST /resetar-erros] Admin '{current_user.username}' iniciando reset.")
+    """Reseta o status_robo de 'Erro:*' para 'Pendente' (apenas admin)."""
+    log.info(f"[POST /resetar-erros] Admin '{current_user.username}' iniciando reset de status de erro.")
     try:
-        values = {'status_robo': 'Pendente', 'ultima_verificacao_robo': None, 'status_portal': None, 'usuario_confirmacao_id': None}
-        stmt = update(models.SolicitacaoCusta).where(models.SolicitacaoCusta.status_robo.like('%Erro%')).values(**values).returning(models.SolicitacaoCusta.id)
-        result = db.execute(stmt); updated_ids = result.scalars().all(); db.commit(); count = len(updated_ids)
-        log.info(f"[POST /resetar-erros] {count} resetadas. IDs: {updated_ids}")
-        return {"message": f"{count} solicitações com erro resetadas."}
-    except Exception as e: db.rollback(); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erro: {e}")
+        # Define os valores a serem atualizados
+        values_to_update = {
+            'status_robo': 'Pendente',
+            'ultima_verificacao_robo': None, # Limpa última verificação
+            'status_portal': None, # Limpa status do portal
+            'usuario_confirmacao_id': None # Limpa confirmação se houve
+        }
+        # Cria a declaração de update
+        stmt = (
+            update(models.SolicitacaoCusta)
+            .where(func.lower(models.SolicitacaoCusta.status_robo).like('erro%'))
+            .values(**values_to_update)
+            .returning(models.SolicitacaoCusta.id) # Retorna os IDs afetados
+        )
+        # Executa e obtém os IDs
+        result = db.execute(stmt)
+        updated_ids = result.scalars().all()
+        db.commit() # Confirma a transação
+        count = len(updated_ids)
+        log.info(f"[POST /resetar-erros] {count} solicitações com status de erro foram resetadas para 'Pendente'. IDs: {updated_ids}")
+        return {"message": f"{count} solicitações com erro foram resetadas para 'Pendente'."}
+    except Exception as e:
+        db.rollback() # Desfaz em caso de erro
+        log.error(f"[POST /resetar-erros] Erro interno ao resetar status: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erro interno ao resetar status: {e}")
 
 @app.get("/health")
 def health_check():
     """Verifica se a API está online."""
     return {"status": "ok"}
-

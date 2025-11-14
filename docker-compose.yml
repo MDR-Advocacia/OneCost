@@ -19,12 +19,17 @@ services:
       # Aponta para o Dockerfile dentro da pasta backend
       dockerfile: backend/Dockerfile
     container_name: onecost_backend
+    # --- MUDANÇA: INSTALA A BIBLIOTECA CORRETA ---
+    command: >
+      sh -c "pip install prometheus-fastapi-instrumentator==7.0.0 && 
+             uvicorn server:app --host 0.0.0.0 --port 8000 --reload"
+    # ---------------------------------------------
     volumes:
       # Mapeia a pasta do código do backend
       - ./backend:/app
       # Mapeia o .env para dentro do container
       - ./.env:/app/.env:ro
-      # ---> NOVA LINHA: Mapeia a pasta de comprovantes para uma pasta 'static' dentro do container <---
+      # Mapeia a pasta de comprovantes para uma pasta 'static' dentro do container
       - ./comprovantes:/app/static/comprovantes
     ports:
       - "8001:8000"
@@ -53,4 +58,3 @@ services:
 
 volumes:
   postgres_data:
-

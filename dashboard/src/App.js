@@ -28,7 +28,6 @@ const CloseIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="ico
 const DetailsIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="icon icon-details" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"> <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /> </svg> );
 const ChevronDownIcon = ({ isOpen }) => ( <svg xmlns="http://www.w3.org/2000/svg" className={`icon icon-chevron ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}> <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /> </svg> );
 const AdminIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="icon icon-admin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}> <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /> <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /> </svg> );
-// <<< NOVO Ícone de Edição >>>
 const EditIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="icon icon-edit" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}> <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /> </svg> );
 
 
@@ -44,6 +43,7 @@ const formatDataHora = (dataString) => {
             if (parts.length === 3) {
                  const dataOnly = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
                  if (!isNaN(dataOnly.getTime())) {
+                     // Para datas simples, retorna apenas a data formatada
                      return dataOnly.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
                  }
             }
@@ -52,8 +52,10 @@ const formatDataHora = (dataString) => {
         }
         // Verifica se a string original parece ter hora
         if (dataString.includes('T') || dataString.includes(' ')) {
+             // Para data/hora completas, retorna formato local completo
             return data.toLocaleString('pt-BR', {}); // Formato data e hora local
         } else {
+             // Para strings que são apenas data (mas parseadas com sucesso), retorna só data (UTC)
             return data.toLocaleDateString('pt-BR', { timeZone: 'UTC' }); // Formato só data (considera UTC)
         }
     } catch (e) {
@@ -61,6 +63,7 @@ const formatDataHora = (dataString) => {
         return dataString; // Retorna original em caso de erro
     }
 };
+
 const formatValorDisplay = (valor) => {
     if (valor === null || valor === undefined || valor === '') return 'N/A';
     try {
@@ -79,14 +82,13 @@ const formatValorDisplay = (valor) => {
 };
 
 // --- COMPONENTE DO FORMULÁRIO (SolicitacaoForm) ---
-// ... (Componente SolicitacaoForm mantido exatamente como está)
 const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
     const [npj, setNpj] = useState('');
     const [numeroProcesso, setNumeroProcesso] = useState('');
     const [numeroSolicitacao, setNumeroSolicitacao] = useState('');
     const [valor, setValor] = useState(''); // Manter como string para o input aceitar vírgula
     const [dataSolicitacao, setDataSolicitacao] = useState(new Date().toISOString().split('T')[0]);
-    // NOVO NOME: Indica se o *usuário* marcou que precisa de confirmação no portal
+    // Mantido o nome original: Indica se o *usuário* marcou que precisa de confirmação no portal
     const [precisaConfirmacaoUsuario, setPrecisaConfirmacaoUsuario] = useState(true);
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -103,14 +105,15 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
         try {
              const valorLimpo = valor.trim().replace(',', '.');
              // Permite apenas dígitos, um ponto/vírgula opcional e até 2 casas decimais
-             if (!/^\d+([.,]\d{1,2})?$/.test(valor.trim()) || valorLimpo === '') {
+             // Permite valor vazio ou apenas 0
+             if (valor.trim() !== '' && !/^\d+([.,]\d{1,2})?$/.test(valor.trim()) ) {
                  throw new Error("Formato de valor inválido. Use 1234.56 ou 1234,56.");
              }
-             valorFloat = parseFloat(valorLimpo);
+             valorFloat = valorLimpo === '' ? 0.0 : parseFloat(valorLimpo); // Converte vazio para 0.0
              if (isNaN(valorFloat)) {
                  throw new Error("Valor não é um número válido.");
              }
-             // Arredonda para 2 casas decimais
+             // Arredonda para garantir 2 casas decimais
              valorFloat = Math.round(valorFloat * 100) / 100;
 
         } catch (err) {
@@ -123,7 +126,7 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
         try {
             const dados = {
                 npj: npj.trim(),
-                numero_processo: numeroProcesso.trim() || null,
+                numero_processo: numeroProcesso.trim() || null, // Envia null se vazio
                 numero_solicitacao: numeroSolicitacao.trim(),
                 valor: valorFloat, // Envia o número validado
                 data_solicitacao: dataSolicitacao,
@@ -157,7 +160,7 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
         }
     };
 
-    // Layout inline para o formulário
+    // Layout inline original mantido
     return (
         <div className="card">
             <h2>Adicionar Solicitação</h2>
@@ -211,11 +214,10 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
     );
 };
 
-
 // --- COMPONENTES ADMIN ---
 
 // Formulário de Criação de Usuário (UserCreateForm)
-// ... (Componente UserCreateForm mantido exatamente como está)
+// ... (Componente UserCreateForm mantido como no arquivo original)
 const UserCreateForm = ({ onUserCreated }) => {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
@@ -276,9 +278,8 @@ const UserCreateForm = ({ onUserCreated }) => {
     );
 };
 
-
 // Tabela de Lista de Usuários (UserListTable)
-// <<< AJUSTES: Adiciona botão Editar e prop onEditUser >>>
+// ... (Componente UserListTable mantido como no arquivo original, incluindo botão Editar)
 const UserListTable = ({ users: initialUsers = [], currentUser, onUserListChanged, onEditUser }) => {
     const [users, setUsers] = useState(initialUsers);
     const [loadingStates, setLoadingStates] = useState({}); // { userId: boolean } - Para ativar/desativar
@@ -290,7 +291,7 @@ const UserListTable = ({ users: initialUsers = [], currentUser, onUserListChange
     }, [initialUsers]);
 
     const handleToggleActive = async (userToUpdate) => {
-        // Impede admin de desativar a si mesmo ou o usuário 'admin' principal
+        // Impede admin de desativar a si mesmo ou o usuário 'admin' principal, mas permite reativar
         if ((userToUpdate.id === currentUser.id || userToUpdate.username === 'admin') && !userToUpdate.is_active === false) {
              setError("Não é possível desativar a si mesmo ou o usuário 'admin'.");
              setTimeout(() => setError(''), 4000);
@@ -311,6 +312,7 @@ const UserListTable = ({ users: initialUsers = [], currentUser, onUserListChange
             // if(onUserListChanged) onUserListChanged();
         } catch (err) {
             setError(`Erro ao ${newStatus ? 'ativar' : 'desativar'} usuário: ${err.response?.data?.detail || err.message}`);
+             setTimeout(() => setError(''), 5000); // Limpa erro após 5s
         } finally {
             setLoadingStates(prev => ({ ...prev, [userToUpdate.id]: false }));
         }
@@ -379,7 +381,8 @@ const UserListTable = ({ users: initialUsers = [], currentUser, onUserListChange
     );
 };
 
-// <<< NOVO: Componente Modal de Edição de Usuário (UserEditModal) >>>
+// Componente Modal de Edição de Usuário (UserEditModal)
+// ... (Componente UserEditModal mantido exatamente como está)
 const UserEditModal = ({ userToEdit, onClose, onUserUpdated }) => {
     const [username, setUsername] = useState(userToEdit.username);
     const [password, setPassword] = useState(''); // Começa vazio
@@ -505,13 +508,167 @@ const UserEditModal = ({ userToEdit, onClose, onUserUpdated }) => {
         document.getElementById('modal-root')
     );
 };
+
+// Componente do Painel de Administração (AdminPanelModal)
+// <<< AJUSTES: Adiciona handlers para abrir/fechar UserEditModal >>>
+const AdminPanelModal = ({ currentUser, onDataRefresh, isOpen, onClose }) => {
+    const [users, setUsers] = useState([]);
+    const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+    const [userListError, setUserListError] = useState('');
+    const [showArchived, setShowArchived] = useState(false); // Estado para ver arquivados
+    const [isResettingErrors, setIsResettingErrors] = useState(false);
+    const [resetError, setResetError] = useState('');
+    const [resetSuccess, setResetSuccess] = useState('');
+
+    // <<< NOVO: Estados para controlar o modal de edição >>>
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editingUser, setEditingUser] = useState(null); // Guarda o usuário sendo editado
+
+    const fetchUsers = useCallback(async () => {
+        setIsLoadingUsers(true);
+        setUserListError('');
+        try {
+            const userList = await listUsers();
+            setUsers(userList);
+        } catch (err) {
+            setUserListError('Erro ao carregar lista de usuários: ' + (err.response?.data?.detail || err.message));
+        } finally {
+            setIsLoadingUsers(false);
+        }
+    }, []); // useCallback para evitar recriação desnecessária
+
+    // Carrega usuários ao abrir o modal principal
+    useEffect(() => {
+        if (isOpen) {
+            fetchUsers();
+            // Também reseta o estado do checkbox 'showArchived' ao abrir,
+            // ou busca o estado inicial dos filtros do App se necessário.
+            // Por simplicidade, vamos resetar para false:
+            setShowArchived(false);
+        }
+    }, [isOpen, fetchUsers]);
+
+    // Função para recarregar a lista de usuários (chamada pelo UserCreateForm E UserEditModal)
+    const refreshUserList = () => {
+        fetchUsers();
+    };
+
+     // Função para o botão de resetar erros
+     const handleResetErrors = async () => {
+        setIsResettingErrors(true);
+        setResetError('');
+        setResetSuccess('');
+        try {
+            const result = await resetarErrosSolicitacoes();
+            setResetSuccess(result.message || 'Status de erro resetados com sucesso.');
+            if(onDataRefresh) onDataRefresh(showArchived, null); // Atualiza lista de solicitações (sem filtro de user aqui)
+            setTimeout(() => setResetSuccess(''), 5000);
+        } catch (err) {
+             setResetError('Erro ao resetar status: ' + (err.response?.data?.detail || err.message));
+        } finally {
+            setIsResettingErrors(false);
+        }
+    };
+
+    // Callback para o checkbox de arquivados
+    const handleShowArchivedChange = (e) => {
+        const checked = e.target.checked;
+        setShowArchived(checked);
+        if(onDataRefresh) onDataRefresh(checked, null); // Pede para App.js recarregar (sem filtro de user aqui)
+    };
+
+    // <<< NOVO: Funções para abrir e fechar o modal de edição >>>
+    const openEditModal = (user) => {
+        console.log("Abrindo modal de edição para:", user);
+        setEditingUser(user);
+        setIsEditModalOpen(true);
+    };
+
+    const closeEditModal = () => {
+        console.log("Fechando modal de edição.");
+        setIsEditModalOpen(false);
+        setEditingUser(null);
+    };
+
+    // <<< NOVO: Função chamada pelo UserEditModal após sucesso >>>
+    const handleUserUpdated = () => {
+        console.log("Usuário atualizado, recarregando lista...");
+        refreshUserList(); // Recarrega a lista de usuários no painel admin
+        // O modal de edição se fecha sozinho após o timeout de sucesso
+    };
+
+
+    if (!isOpen) return null; // Não renderiza nada se fechado
+
+    return createPortal(
+        <> {/* Usa Fragment para permitir múltiplos modais no portal */}
+            <div className="modal-backdrop" onClick={onClose}>
+                <div className="modal-content admin-modal-content" onClick={e => e.stopPropagation()}>
+                    <div className="modal-header">
+                         <h3>Painel Administrativo</h3>
+                         <button onClick={onClose} className="modal-action-button modal-close-icon-button" title="Fechar"><CloseIcon /></button>
+                    </div>
+                    <div className="modal-body">
+                        <section className="admin-section">
+                            <h4>Gerenciar Usuários</h4>
+                            {/* Passa refreshUserList para o formulário de criação */}
+                            <UserCreateForm onUserCreated={refreshUserList} />
+                            {userListError && <p className="form-message error">{userListError}</p>}
+                            {isLoadingUsers ? <p>Carregando...</p> : (
+                                // Passa refreshUserList e openEditModal para a tabela
+                                <UserListTable
+                                    users={users}
+                                    currentUser={currentUser}
+                                    onUserListChanged={refreshUserList}
+                                    onEditUser={openEditModal} // <<< NOVO >>>
+                                />
+                            )}
+                        </section>
+                         <hr className="modal-divider"/>
+                        <section className="admin-section">
+                             <h4>Ações Gerais</h4>
+                             <div className="admin-actions-container">
+                                 <div className="checkbox-container">
+                                    <input
+                                        type="checkbox"
+                                        id="showArchivedAdmin" // ID único para o checkbox no modal
+                                        checked={showArchived}
+                                        onChange={handleShowArchivedChange}
+                                    />
+                                    <label htmlFor="showArchivedAdmin"> Exibir arquivadas na tabela principal</label>
+                                </div>
+                                <button
+                                    onClick={handleResetErrors}
+                                    disabled={isResettingErrors}
+                                    className="button warning small" // Estilo ajustado
+                                 >
+                                     {isResettingErrors ? 'Resetando...' : 'Resetar Erros'}
+                                </button>
+                             </div>
+                            {resetError && <p className="form-message error">{resetError}</p>}
+                            {resetSuccess && <p className="form-message success">{resetSuccess}</p>}
+                        </section>
+                    </div>
+                </div>
+            </div>
+
+            {/* <<< NOVO: Renderiza o Modal de Edição condicionalmente >>> */}
+            {isEditModalOpen && editingUser && (
+                <UserEditModal
+                    userToEdit={editingUser}
+                    onClose={closeEditModal}
+                    onUserUpdated={handleUserUpdated}
+                />
+            )}
+        </>,
+        document.getElementById('modal-root')
+    );
+};
 // --- FIM COMPONENTES ADMIN ---
 
-
 // --- COMPONENTE DA TABELA DE SOLICITAÇÕES ---
-// ... (Componente SolicitacoesTable mantido exatamente como está)
-const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataRefresh }) => {
-    // ... (states, refs, lógicas de filtro e paginação mantidas)
+const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataRefresh, currentFilters }) => {
+    // ... (states, refs, lógicas de filtro e paginação mantidas) ...
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedSolicitacao, setSelectedSolicitacao] = useState(null);
     const [isModalLoading, setIsModalLoading] = useState(false);
@@ -584,10 +741,10 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
     const handleNextPage = () => paginate(currentPage + 1);
     const handlePrevPage = () => paginate(currentPage - 1);
 
-    // Reset page number when filters change
+    // Reset page number when filters change externally (via props) or internally
     useEffect(() => {
         setCurrentPage(1);
-    }, [filterNpj, filterProcesso, filterStartDate, filterEndDate]);
+    }, [filterNpj, filterProcesso, filterStartDate, filterEndDate, currentFilters]);
 
 
     // Fechar Menu Dropdown ao clicar fora
@@ -600,6 +757,13 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    // Função interna para chamar onDataRefresh com os filtros atuais
+    const triggerRefresh = () => {
+         if (onDataRefresh) {
+             onDataRefresh(currentFilters.includeArchived, currentFilters.userFilter);
+         }
+    };
 
     // Funções do Modal
     const openModal = (solicitacao) => {
@@ -663,7 +827,10 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
         return links.map((link, index) => {
             const nomeArquivo = link.split(/[\\/]/).pop() || `Arquivo ${index + 1}`;
             const staticPath = "static/comprovantes";
-            const downloadUrl = `${API_URL.replace(/\/$/, '')}/${staticPath}/${link.replace(/^\//, '')}`;
+             // Remove barras iniciais extras e garante uma única barra
+             const cleanLink = link.replace(/^\/+/, '');
+             const downloadUrl = `${API_URL.replace(/\/$/, '')}/${staticPath}/${cleanLink}`;
+
 
             // Determina o tipo pelo nome (heurística)
             let tipo = 'Documento';
@@ -710,11 +877,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                 usuario_confirmacao_id: null, // Limpa confirmação se houve
                 especificacao: null // Limpa especificacao
             });
-             if (onDataRefresh) {
-                 // Passa o estado atual de showArchived
-                 const showArchivedCheckbox = document.getElementById('showArchivedAdmin'); // Busca o checkbox do modal admin
-                 onDataRefresh(showArchivedCheckbox ? showArchivedCheckbox.checked : false);
-             }
+            triggerRefresh(); // Atualiza a lista com filtros atuais
             closeModal();
         } catch (err) {
             console.error("Erro ao resetar solicitação:", err);
@@ -728,13 +891,10 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
         if (!selectedSolicitacao || isModalLoading || selectedSolicitacao.usuario_finalizacao_id) return;
         setIsModalLoading(true);
         setModalError('');
-        console.log(`[SolicitacoesTable] Marcando solicitação ID ${selectedSolicitacao.id} como finalizada...`);
+        console.log(`[SolicitacoesTable] Marcando solicitação ID ${selectedSolicitacao.id} como finalizada (tratada)...`);
         try {
             await updateSolicitacao(selectedSolicitacao.id, { finalizar: true });
-             if (onDataRefresh) {
-                 const showArchivedCheckbox = document.getElementById('showArchivedAdmin');
-                 onDataRefresh(showArchivedCheckbox ? showArchivedCheckbox.checked : false);
-             }
+            triggerRefresh(); // Atualiza a lista com filtros atuais
             closeModal(); // Fecha o modal após sucesso
         } catch (err) {
              console.error("Erro ao marcar como finalizado:", err);
@@ -753,10 +913,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
         console.log(`[SolicitacoesTable] Admin ${currentUser.username} ${newArchiveStatus ? 'arquivando' : 'desarquivando'} solicitação ID ${selectedSolicitacao.id}...`);
         try {
             await archiveSolicitation(selectedSolicitacao.id, newArchiveStatus);
-             if (onDataRefresh) {
-                 const showArchivedCheckbox = document.getElementById('showArchivedAdmin');
-                 onDataRefresh(showArchivedCheckbox ? showArchivedCheckbox.checked : false);
-            }
+            triggerRefresh(); // Atualiza a lista com filtros atuais
             closeModal(); // Fecha o modal
         } catch (err) {
             console.error("Erro ao arquivar/desarquivar:", err);
@@ -807,11 +964,19 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                         {currentSolicitacoes.length > 0 ? (
                             currentSolicitacoes.map(item => {
                                 const statusRoboClasse = getRoboStatusClass(item.status_robo);
-                                let statusText = item.status_portal || item.status_robo || 'Pendente';
+                                let statusText = item.status_robo || 'Pendente';
                                 // Prioriza finalizado/tratado
                                 if(item.usuario_finalizacao) { statusText = `Tratado (${item.usuario_finalizacao.username})`; }
                                 // Sobrescreve se arquivado
-                                if(item.is_archived) { statusText = `(Arquivado)`; }
+                                else if(item.is_archived) { statusText = `(Arquivado)`; }
+                                // Se não for nenhum dos acima, usa o status do portal se existir
+                                else if (item.status_portal) { statusText = item.status_portal; }
+
+                                // Define o título (tooltip) para o status
+                                let statusTitle = `Robô: ${item.status_robo || 'Pendente'} | Portal: ${item.status_portal || 'N/A'}`;
+                                if (item.usuario_finalizacao) { statusTitle = `Tratado por ${item.usuario_finalizacao.username} em ${formatDataHora(item.data_finalizacao)}`; }
+                                if (item.is_archived) { statusTitle = `Arquivado por ${item.usuario_arquivamento?.username || 'Admin'} em ${formatDataHora(item.data_arquivamento)}`; }
+
 
                                 return (
                                     <tr key={item.id} className={item.is_archived ? 'archived-row' : ''}>
@@ -822,13 +987,14 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                         <td>{item.usuario_criacao?.username || 'N/A'}</td>
                                         <td>
                                           <div className="status-cell">
-                                            {!item.is_archived && (
+                                            {/* Mostra bolinha apenas se não estiver arquivado ou tratado */}
+                                            {!item.is_archived && !item.usuario_finalizacao_id && (
                                                 <span
                                                   className={`status-indicator status-${statusRoboClasse}`}
-                                                  title={`Robô: ${item.status_robo || 'Pendente'} | Portal: ${item.status_portal || 'N/A'}`}
+                                                  title={statusTitle} // Tooltip com mais detalhes
                                                 ></span>
                                              )}
-                                            <span className="status-text" title={statusText}>
+                                            <span className="status-text" title={statusTitle}>
                                               {statusText}
                                             </span>
                                           </div>
@@ -855,7 +1021,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                 </div>
              )}
 
-            {/* Modal Detalhes com Layout Ajustado */}
+            {/* Modal Detalhes com Layout Ajustado e Botão Concluído */}
              {isModalOpen && selectedSolicitacao && createPortal(
                 <div className="modal-backdrop" onClick={closeModal}>
                     <div className="modal-content modal-content-wide" onClick={e => e.stopPropagation()}>
@@ -869,16 +1035,22 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                     </button>
                                     {isMenuOpen && (
                                         <div className="modal-dropdown-menu">
+                                            {/* Opção Resetar Pendente (se não arquivado) */}
                                             {!selectedSolicitacao.is_archived && (
                                                 <button onClick={handleResetPendente} disabled={isModalLoading} className="dropdown-item">
                                                     Resetar Pendente
                                                 </button>
                                             )}
+                                            {/* Opção Arquivar/Desarquivar (somente admin) */}
                                             {isAdmin && (
                                                 <button onClick={handleToggleArchive} disabled={isModalLoading} className={`dropdown-item ${selectedSolicitacao.is_archived ? 'action-unarchive' : 'action-archive'}`}>
                                                     {selectedSolicitacao.is_archived ? 'Desarquivar' : 'Arquivar'}
                                                 </button>
                                             )}
+                                             {/* Mensagem se não houver ações */}
+                                             {!isAdmin && selectedSolicitacao.is_archived && (
+                                                 <span className="dropdown-item-disabled">Nenhuma ação disponível</span>
+                                             )}
                                         </div>
                                     )}
                                 </div>
@@ -914,7 +1086,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
 
                              <div className="modal-detail-line user-info-line">
                                 <p><strong className="modal-label-sm">Criado por:</strong> {selectedSolicitacao.usuario_criacao?.username || 'N/A'}</p>
-                                <p><strong className="modal-label-sm">Finalizado por:</strong> {selectedSolicitacao.usuario_finalizacao?.username || 'Não'} {selectedSolicitacao.data_finalizacao ? `em ${formatDataHora(selectedSolicitacao.data_finalizacao)}` : ''}</p>
+                                <p><strong className="modal-label-sm">Tratado por:</strong> {selectedSolicitacao.usuario_finalizacao?.username || 'Não'} {selectedSolicitacao.data_finalizacao ? `em ${formatDataHora(selectedSolicitacao.data_finalizacao)}` : ''}</p>
                                 <p><strong className="modal-label-sm">Arquivado por:</strong> {selectedSolicitacao.usuario_arquivamento?.username || 'Não'} {selectedSolicitacao.data_arquivamento ? `em ${formatDataHora(selectedSolicitacao.data_arquivamento)}` : ''}</p>
                              </div>
 
@@ -942,16 +1114,19 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                         </div>
                          <div className="modal-footer">
                             {/* Botão Concluído (Marcar como Tratado) */}
+                            {/* Condição: Não arquivado E status robô inclui 'finalizado' E ainda não foi finalizado pelo usuário */}
                             {!selectedSolicitacao.is_archived && selectedSolicitacao.status_robo?.toLowerCase().includes('finalizado') && !selectedSolicitacao.usuario_finalizacao_id && (
                                 <button
                                     onClick={handleFinalizarTratamento}
-                                    className="button small success"
+                                    className="button small success" // Estilo verde
                                     disabled={isModalLoading}
                                     title="Marcar que os documentos foram tratados/inseridos no sistema externo"
                                 >
                                     {isModalLoading ? '...' : 'Concluído'}
                                 </button>
                             )}
+                             {/* Botão Fechar (agora sem texto, só o ícone no header) */}
+                             {/* <button onClick={closeModal} className="button secondary small" disabled={isModalLoading}>Fechar</button> */}
                         </div>
                     </div>
                 </div>,
@@ -963,163 +1138,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
 
 
 
-// --- COMPONENTE DO PAINEL DE ADMINISTRAÇÃO (Modal) ---
-// <<< AJUSTES: Adiciona estado e handlers para o UserEditModal >>>
-const AdminPanelModal = ({ currentUser, onDataRefresh, isOpen, onClose }) => {
-    const [users, setUsers] = useState([]);
-    const [isLoadingUsers, setIsLoadingUsers] = useState(false);
-    const [userListError, setUserListError] = useState('');
-    const [showArchived, setShowArchived] = useState(false); // Estado para ver arquivados
-    const [isResettingErrors, setIsResettingErrors] = useState(false);
-    const [resetError, setResetError] = useState('');
-    const [resetSuccess, setResetSuccess] = useState('');
-
-    // <<< NOVO: Estados para controlar o modal de edição >>>
-    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-    const [editingUser, setEditingUser] = useState(null); // Guarda o usuário sendo editado
-
-    const fetchUsers = useCallback(async () => {
-        setIsLoadingUsers(true);
-        setUserListError('');
-        try {
-            const userList = await listUsers();
-            setUsers(userList);
-        } catch (err) {
-            setUserListError('Erro ao carregar lista de usuários: ' + (err.response?.data?.detail || err.message));
-        } finally {
-            setIsLoadingUsers(false);
-        }
-    }, []); // useCallback para evitar recriação desnecessária
-
-    // Carrega usuários ao abrir o modal principal
-    useEffect(() => {
-        if (isOpen) {
-            fetchUsers();
-        }
-    }, [isOpen, fetchUsers]);
-
-    // Função para recarregar a lista de usuários (chamada pelo UserCreateForm E UserEditModal)
-    // <<< AJUSTE: Renomeada para ser mais genérica >>>
-    const refreshUserList = () => {
-        fetchUsers();
-    };
-
-     // Função para o botão de resetar erros
-     const handleResetErrors = async () => {
-        setIsResettingErrors(true);
-        setResetError('');
-        setResetSuccess('');
-        try {
-            const result = await resetarErrosSolicitacoes();
-            setResetSuccess(result.message || 'Status de erro resetados com sucesso.');
-            if(onDataRefresh) onDataRefresh(showArchived); // Atualiza lista de solicitações
-            setTimeout(() => setResetSuccess(''), 5000);
-        } catch (err) {
-             setResetError('Erro ao resetar status: ' + (err.response?.data?.detail || err.message));
-        } finally {
-            setIsResettingErrors(false);
-        }
-    };
-
-    // Callback para o checkbox de arquivados
-    const handleShowArchivedChange = (e) => {
-        const checked = e.target.checked;
-        setShowArchived(checked);
-        if(onDataRefresh) onDataRefresh(checked); // Pede para App.js recarregar com o novo filtro
-    };
-
-    // <<< NOVO: Funções para abrir e fechar o modal de edição >>>
-    const openEditModal = (user) => {
-        console.log("Abrindo modal de edição para:", user);
-        setEditingUser(user);
-        setIsEditModalOpen(true);
-    };
-
-    const closeEditModal = () => {
-        console.log("Fechando modal de edição.");
-        setIsEditModalOpen(false);
-        setEditingUser(null);
-    };
-
-    // <<< NOVO: Função chamada pelo UserEditModal após sucesso >>>
-    const handleUserUpdated = () => {
-        console.log("Usuário atualizado, recarregando lista...");
-        refreshUserList(); // Recarrega a lista de usuários no painel admin
-        // O modal de edição se fecha sozinho após o timeout de sucesso
-    };
-
-
-    if (!isOpen) return null; // Não renderiza nada se fechado
-
-    return createPortal(
-        <> {/* Usa Fragment para permitir múltiplos modais no portal */}
-            <div className="modal-backdrop" onClick={onClose}>
-                <div className="modal-content admin-modal-content" onClick={e => e.stopPropagation()}>
-                    <div className="modal-header">
-                         <h3>Painel Administrativo</h3>
-                         <button onClick={onClose} className="modal-action-button modal-close-icon-button" title="Fechar"><CloseIcon /></button>
-                    </div>
-                    <div className="modal-body">
-                        <section className="admin-section">
-                            <h4>Gerenciar Usuários</h4>
-                            {/* Passa refreshUserList para o formulário de criação */}
-                            <UserCreateForm onUserCreated={refreshUserList} />
-                            {userListError && <p className="form-message error">{userListError}</p>}
-                            {isLoadingUsers ? <p>Carregando...</p> : (
-                                // Passa refreshUserList e openEditModal para a tabela
-                                <UserListTable
-                                    users={users}
-                                    currentUser={currentUser}
-                                    onUserListChanged={refreshUserList}
-                                    onEditUser={openEditModal} // <<< NOVO >>>
-                                />
-                            )}
-                        </section>
-                         <hr className="modal-divider"/>
-                        <section className="admin-section">
-                             <h4>Ações Gerais</h4>
-                             <div className="admin-actions-container">
-                                 <div className="checkbox-container">
-                                    <input
-                                        type="checkbox"
-                                        id="showArchivedAdmin" // ID único para o checkbox no modal
-                                        checked={showArchived}
-                                        onChange={handleShowArchivedChange}
-                                    />
-                                    <label htmlFor="showArchivedAdmin"> Exibir arquivadas na tabela principal</label>
-                                </div>
-                                <button
-                                    onClick={handleResetErrors}
-                                    disabled={isResettingErrors}
-                                    className="button warning small"
-                                 >
-                                     {isResettingErrors ? 'Resetando...' : 'Resetar Erros'}
-                                </button>
-                             </div>
-                            {resetError && <p className="form-message error">{resetError}</p>}
-                            {resetSuccess && <p className="form-message success">{resetSuccess}</p>}
-                        </section>
-                    </div>
-                </div>
-            </div>
-
-            {/* <<< NOVO: Renderiza o Modal de Edição condicionalmente >>> */}
-            {isEditModalOpen && editingUser && (
-                <UserEditModal
-                    userToEdit={editingUser}
-                    onClose={closeEditModal}
-                    onUserUpdated={handleUserUpdated}
-                />
-            )}
-        </>,
-        document.getElementById('modal-root')
-    );
-};
-
-
-
 // --- COMPONENTE PRINCIPAL DA APLICAÇÃO ---
-// ... (Componente App mantido exatamente como está)
 function App() {
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [isLoading, setIsLoading] = useState(true); // Controla o carregamento inicial
@@ -1128,11 +1147,32 @@ function App() {
     const [error, setError] = useState(''); // Erro global da aplicação
     const [isAdminModalOpen, setIsAdminModalOpen] = useState(false); // Estado do modal admin
 
+    // <<< NOVO: Estado para os filtros >>>
+    const [filters, setFilters] = useState({
+        includeArchived: false,
+        userFilter: 'all' // 'all' ou 'me'
+    });
+
+    // Função de Logout - precisa ser definida antes de ser usada no useCallback
+     const handleLogout = useCallback(() => {
+        console.log("[App] Executando logout...");
+        localStorage.removeItem('token');
+        setIsLoggedIn(false);
+        setCurrentUser(null);
+        setSolicitacoes([]);
+        setError('');
+        setFilters({ includeArchived: false, userFilter: 'all' }); // Reseta filtros no logout
+        setIsLoading(false); // Garante que não fique carregando
+        setIsAdminModalOpen(false); // Fecha modal admin ao deslogar
+    }, []); // useCallback sem dependências
+
+
     // Função para buscar dados do usuário e solicitações
-    // useCallback para evitar recriações desnecessárias, aceita 'includeArchived'
-    const fetchData = useCallback(async (includeArchived = false) => {
-        console.log(`[App] Chamando fetchData... includeArchived=${includeArchived}`);
+    // useCallback para evitar recriações desnecessárias, aceita filtros
+    const fetchData = useCallback(async (currentFilters) => {
+        console.log(`[App] Chamando fetchData... Filtros:`, currentFilters);
         setError(''); // Limpa erros antigos
+        setIsLoading(true); // Inicia loading para busca
         let userToUse = currentUser; // Usa o estado atual como base
 
         try {
@@ -1141,12 +1181,19 @@ function App() {
                 console.log("[App] Buscando dados do usuário...");
                 userToUse = await getCurrentUser();
                 setCurrentUser(userToUse); // Atualiza o estado
+                 if (!userToUse) { // Se ainda assim não encontrar usuário, força logout
+                     console.error("[App] Não foi possível obter dados do usuário atual após tentativa.");
+                     handleLogout();
+                     return;
+                 }
             } else {
                  console.log("[App] Usando dados do usuário do estado:", userToUse);
             }
 
-            console.log("[App] Buscando solicitações...");
-            const solicitacoesResponse = await getSolicitacoes(includeArchived);
+            console.log("[App] Buscando solicitações com filtros:", currentFilters);
+            // Determina o userId a ser passado para a API
+            const userIdParam = currentFilters.userFilter === 'me' ? userToUse.id : null;
+            const solicitacoesResponse = await getSolicitacoes(currentFilters.includeArchived, userIdParam);
             console.log("[App] Solicitações recebidas:", solicitacoesResponse);
             // Ordena por ID decrescente
             setSolicitacoes(solicitacoesResponse.sort((a, b) => b.id - a.id));
@@ -1157,32 +1204,25 @@ function App() {
              if (err.response) {
                  detailedError = `Erro ${err.response.status}: ${err.response.data?.detail || err.message}`;
                  // O interceptor já trata o 401 para deslogar
+                 if (err.response.status !== 401) { // Só mostra erro se não for 401 (já tratado)
+                     setError('Erro ao buscar dados: ' + detailedError);
+                 }
              } else if (err.request) {
                  detailedError = "Sem resposta do servidor.";
+                 setError('Erro ao buscar dados: ' + detailedError);
+             } else {
+                  setError('Erro ao buscar dados: ' + detailedError);
              }
-             setError('Erro ao buscar dados: ' + detailedError);
              // Se o erro não for 401, mas não temos token, desloga preventivamente
              if (!localStorage.getItem('token') && err.response?.status !== 401) {
-                 handleLogout(); // Chama a função de logout definida abaixo
+                 handleLogout();
              }
         } finally {
              // Garante que o estado de carregamento seja desativado
              setIsLoading(false);
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentUser]); // Recria fetchData SÓ se currentUser mudar
-
-     // Função de Logout - precisa ser definida antes de ser usada no useCallback
-     const handleLogout = useCallback(() => {
-        console.log("[App] Executando logout...");
-        localStorage.removeItem('token');
-        setIsLoggedIn(false);
-        setCurrentUser(null);
-        setSolicitacoes([]);
-        setError('');
-        setIsLoading(false); // Garante que não fique carregando
-        setIsAdminModalOpen(false); // Fecha modal admin ao deslogar
-    }, []); // useCallback sem dependências
+    }, [currentUser, handleLogout]); // Recria fetchData se currentUser ou handleLogout mudar
 
 
     // Efeito para verificar o token e buscar dados iniciais
@@ -1191,8 +1231,8 @@ function App() {
         const token = localStorage.getItem('token');
         if (token) {
             console.log("[App useEffect] Token encontrado. Buscando dados iniciais...");
-            setIsLoading(true); // Ativa o loading ANTES de chamar fetchData
-            fetchData(false); // Busca inicial sem arquivados
+            // Não seta isLoading aqui, fetchData faz isso
+            fetchData(filters); // Busca inicial com filtros padrão
         } else {
             console.log("[App useEffect] Nenhum token. Indo para login.");
             setIsLoading(false); // Não está carregando se não tem token
@@ -1200,16 +1240,19 @@ function App() {
             setCurrentUser(null);
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // Executa apenas na montagem inicial
+    }, []); // Executa apenas uma vez ao montar
+
 
     // Callback para quando o login for bem-sucedido
     const handleLoginSuccess = useCallback((loginData) => {
         console.log("[App] Login OK. Iniciando busca de dados pós-login...");
         setIsLoading(true); // Mostra carregando enquanto busca dados
-        // Primeiro busca o usuário, depois busca os dados com base nele
+        const initialFilters = { includeArchived: false, userFilter: 'all' }; // Define filtros iniciais
+        setFilters(initialFilters); // Reseta filtros no login
+        // Primeiro busca o usuário, depois busca os dados com base nele e nos filtros
         getCurrentUser().then(user => {
             setCurrentUser(user); // Define o usuário atual
-            return fetchData(false); // Busca as solicitações
+            return fetchData(initialFilters); // Busca as solicitações com filtros iniciais
         }).catch(err => {
             console.error("Erro pós-login ao buscar usuário:", err);
             setError("Erro ao carregar dados do usuário.");
@@ -1219,20 +1262,37 @@ function App() {
     }, [fetchData, handleLogout]); // Depende de fetchData e handleLogout
 
 
-    // Callback para componentes filhos solicitarem atualização de dados
-    const handleDataNeedsRefresh = useCallback((includeArchived = false) => {
-        console.log(`[App] Solicitação de atualização de dados recebida. includeArchived=${includeArchived}`);
-        fetchData(includeArchived);
-    }, [fetchData]); // Depende de fetchData
+    // Callback para componentes filhos solicitarem atualização de dados ou mudarem filtros
+    // <<< AJUSTE: Renomeado para handleFiltersChange >>>
+    const handleFiltersChange = useCallback((includeArchived, userFilterValue) => {
+        const newFilters = {
+            // Se includeArchived não for undefined, usa ele, senão mantém o atual
+            includeArchived: includeArchived !== undefined ? includeArchived : filters.includeArchived,
+            // Se userFilterValue não for undefined, usa ele, senão mantém o atual
+            userFilter: userFilterValue !== undefined ? userFilterValue : filters.userFilter
+        };
+        console.log(`[App] Solicitação de mudança de filtros/refresh recebida:`, newFilters);
+        setFilters(newFilters); // Atualiza o estado dos filtros
+        fetchData(newFilters); // Busca dados com os novos filtros
+    }, [fetchData, filters]); // Depende de fetchData e do estado atual dos filtros
+
+
+    // NOVO: Handler para o filtro de usuário (radio buttons)
+    const handleUserFilterChange = (event) => {
+        const newUserFilter = event.target.value;
+        // Chama handleFiltersChange passando undefined para includeArchived para manter o valor atual
+        handleFiltersChange(undefined, newUserFilter);
+    };
 
 
     // Tela de Carregamento Inicial
-    if (isLoading && !currentUser && localStorage.getItem('token')) { // Mostra loading só se estiver realmente carregando dados iniciais
+    // Mostra se isLoading é true E (não está logado OU ainda não tem dados do currentUser)
+    if (isLoading && (!isLoggedIn || !currentUser) && localStorage.getItem('token')) {
         return <div className="loading-screen">Carregando...</div>;
     }
 
     // Tela de Login
-    if (!isLoggedIn) {
+    if (!isLoggedIn || !currentUser) { // Verifica currentUser também
         return <LoginPage onLoginSuccess={handleLoginSuccess} />;
     }
 
@@ -1256,21 +1316,62 @@ function App() {
                 {/* Mensagem de Erro Global */}
                 {error && <p className="global-error-message">{error}</p>}
 
-                {/* Formulário de Criação de Solicitação (Todos usuários ativos podem ver) */}
-                <SolicitacaoForm onSolicitacaoCriada={() => handleDataNeedsRefresh(false)} /> {/* Sempre recarrega sem arquivados ao criar */}
+                {/* Formulário de Criação de Solicitação */}
+                {/* Passa a função para recarregar usando os filtros atuais */}
+                <SolicitacaoForm onSolicitacaoCriada={() => handleFiltersChange(filters.includeArchived, filters.userFilter)} />
+
+                 {/* <<< NOVO: Filtro de Usuário >>> */}
+                 <div className="card filter-container">
+                     <h4>Exibir:</h4>
+                     <div className="filter-options">
+                         <label>
+                             <input
+                                 type="radio"
+                                 name="userFilter"
+                                 value="all"
+                                 checked={filters.userFilter === 'all'}
+                                 onChange={handleUserFilterChange}
+                                 disabled={isLoading} // Desabilita durante carregamento
+                             />
+                             Todas
+                         </label>
+                         <label>
+                             <input
+                                 type="radio"
+                                 name="userFilter"
+                                 value="me"
+                                 checked={filters.userFilter === 'me'}
+                                 onChange={handleUserFilterChange}
+                                 disabled={isLoading} // Desabilita durante carregamento
+                             />
+                             Minhas Solicitações
+                         </label>
+                     </div>
+                     {/* Botão de Refresh Manual 
+                     <button
+                        onClick={() => handleFiltersChange(filters.includeArchived, filters.userFilter)} // Recarrega com os filtros atuais
+                        disabled={isLoading}
+                        className="button refresh-button"
+                        title="Recarregar lista"
+                     >
+                        {isLoading ? '...' : '🔄'}
+                     </button>*/}
+                </div>
 
                 {/* Tabela de Solicitações */}
                 <SolicitacoesTable
                     solicitacoes={solicitacoes}
                     currentUser={currentUser} // Passa o usuário atual para a tabela
-                    onDataRefresh={handleDataNeedsRefresh} // Passa a função de refresh
+                    onDataRefresh={handleFiltersChange} // Passa a função de refresh/mudança de filtro
+                    currentFilters={filters} // Passa os filtros atuais para a tabela usar no refresh
                 />
             </main>
 
             {/* Renderiza o Modal Admin (ele controla a própria visibilidade) */}
             <AdminPanelModal
                 currentUser={currentUser}
-                onDataRefresh={handleDataNeedsRefresh}
+                // Passa a função que aceita includeArchived e userFilter
+                onDataRefresh={handleFiltersChange}
                 isOpen={isAdminModalOpen}
                 onClose={() => setIsAdminModalOpen(false)}
             />
@@ -1283,3 +1384,4 @@ function App() {
 }
 
 export default App;
+
