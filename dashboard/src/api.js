@@ -82,9 +82,17 @@ export const getCurrentUser = async () => {
 
 // --- FUNÇÕES DE SOLICITAÇÕES DE CUSTAS ---
 
-export const getSolicitacoes = async (includeArchived = false) => {
-    console.log(`[api.js] Buscando /solicitacoes... includeArchived=${includeArchived}`);
-    const params = { include_archived: includeArchived, limit: 500 }; // Aumentar limite padrão?
+// MODIFICADO: Aceita userId opcional
+export const getSolicitacoes = async (includeArchived = false, userId = null) => {
+    console.log(`[api.js] Buscando /solicitacoes... includeArchived=${includeArchived}, userId=${userId}`);
+    const params = {
+        include_archived: includeArchived,
+        limit: 500 // Mantém limite alto por enquanto
+    };
+    // Adiciona o filtro de usuário se fornecido
+    if (userId !== null && userId !== undefined) {
+        params.usuario_id = userId; // Nome do parâmetro no backend
+    }
     const response = await api.get('/solicitacoes/', { params });
     console.log(`[api.js] Recebidas ${response.data.length} solicitações.`);
     return response.data;
@@ -106,6 +114,7 @@ export const updateSolicitacao = async (id, solicitacaoData) => {
 
 export const archiveSolicitation = async (id, isArchived) => {
     console.log(`[api.js] Enviando PUT /solicitacoes/${id}/archive: { arquivar: ${isArchived} }`);
+    // O corpo da requisição precisa ser um objeto com a chave 'arquivar'
     const response = await api.put(`/solicitacoes/${id}/archive`, { arquivar: isArchived });
     console.log("[api.js] Status arquivamento atualizado:", response.data);
     return response.data;
@@ -142,6 +151,7 @@ export const updateUserStatus = async (userId, isActive) => { // Ativar/Desativa
     return response.data;
 };
 
+// Adicionada função para atualização geral (embora não usada no form atual)
 export const updateUser = async (userId, userData) => {
     console.log(`[api.js] Enviando PUT /users/${userId} :`, userData);
     const response = await api.put(`/users/${userId}`, userData);
@@ -151,4 +161,3 @@ export const updateUser = async (userId, userData) => {
 
 
 export default api;
-
