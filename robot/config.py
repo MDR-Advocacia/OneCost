@@ -15,7 +15,7 @@ try:
         load_dotenv(dotenv_path=dotenv_path)
         log.info("Arquivo .env carregado com sucesso.")
     else:
-        log.warning(f"Arquivo .env não encontrado em {dotenv_path}. Usando valores padrão/variáveis de ambiente existentes.")
+        log.warning(f"Arquivo .env não encontrado em {dotenv_path}. Usando variáveis de ambiente do sistema.")
 except Exception as e:
     log.error(f"Erro ao carregar .env: {e}")
 
@@ -32,42 +32,26 @@ LOG_DIR = ROBOT_DIR / "logs"
 try:
     COMPROVANTES_DIR.mkdir(parents=True, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log.info(f"Diretório de comprovantes: {COMPROVANTES_DIR}")
-    log.info(f"Diretório de logs: {LOG_DIR}")
 except Exception as e:
     log.error(f"Erro ao criar diretórios: {e}")
 
 # URL do portal de custas
 URL_PORTAL_CUSTAS = os.getenv("URL_PORTAL_CUSTAS", "https://juridico.bb.com.br/paj/app/paj-custos/spas/custos/custos.app.html#/inicio/*")
 
-# Credenciais do robô para login na API do backend
+# Credenciais do robô
 ROBOT_USERNAME = os.getenv("ROBOT_USERNAME", "robot")
 ROBOT_PASSWORD = os.getenv("ROBOT_PASSWORD", "default_password")
 
+# Credenciais do robô para o AD / OneLog
+ONELOG_USERNAME = os.getenv("ONELOG_USERNAME", "robo.onecost")
+ONELOG_PASSWORD = os.getenv("ONELOG_PASSWORD", "senha_ad")
+
 # Timeout para esperar por downloads (em milissegundos)
-DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT_MS", "60000")) # 60 segundos por padrão
-log.info(f"Usando DOWNLOAD_TIMEOUT de {DOWNLOAD_TIMEOUT}ms")
+DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT_MS", "60000")) 
 
-# Configurações de Login via Extensão/CDP
-CDP_ENDPOINT = os.getenv("CDP_ENDPOINT", "http://localhost:9222")
-EXTENSION_URL = os.getenv("EXTENSION_URL", "chrome-extension://lnidijeaekolpfeckelhkomndglcglhh/index.html")
-# Ajuste o CHROME_USER_DATA_DIR se necessário para sua máquina
-CHROME_USER_DATA_DIR = os.getenv("CHROME_USER_DATA_DIR", str(Path.home() / "chrome-dev-profile-onecost"))
-log.info(f"Usando CHROME_USER_DATA_DIR: {CHROME_USER_DATA_DIR}")
+# URLs das APIs
+API_BASE_URL = os.getenv("API_BASE_URL", "http://backend:8000")
+ONELOG_API_URL = os.getenv("ONELOG_API_URL", "http://api-onelog.mdradvocacia.com")
 
-# URL base da API do backend
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8001") # Corresponde ao docker-compose
-log.info(f"Usando API_BASE_URL: {API_BASE_URL}")
-
-# *** NOVO: Tempo limite da sessão do portal em segundos ***
-# Define quanto tempo a sessão do portal deve durar antes de forçar um novo login.
-# Exemplo: 30 minutos = 1800 segundos. Ajuste conforme necessário.
-SESSION_TIMEOUT_SECONDS = int(os.getenv("SESSION_TIMEOUT_SECONDS", "1800")) # Padrão 30 minutos
-log.info(f"Usando SESSION_TIMEOUT_SECONDS: {SESSION_TIMEOUT_SECONDS}s")
-
-
-# Verifica se os diretórios essenciais foram criados (apenas loga)
-if not LOG_DIR.exists():
-     log.error(f"Falha ao verificar/criar diretório de logs: {LOG_DIR}")
-if not SCRIPTS_DIR.exists():
-     log.warning(f"Diretório de scripts não encontrado: {SCRIPTS_DIR}")
+# Tempo limite da sessão do portal em segundos
+SESSION_TIMEOUT_SECONDS = int(os.getenv("SESSION_TIMEOUT_SECONDS", "1800"))

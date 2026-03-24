@@ -133,7 +133,19 @@ def main():
             page.goto(URL_PORTAL_CUSTAS)
             log.info("Aguardando carregamento inicial da página de custos...")
             # Espera por elementos chave da página para garantir que carregou
-            page.wait_for_selector("input#npj, button:has-text('Limpar')", timeout=60000)
+            #page.wait_for_selector("input#npj, button:has-text('Limpar')", timeout=60000)
+
+            try:
+                log.info("Aguardando formulário NPJ carregar...")
+                page.wait_for_selector("input#npj, button:has-text('Limpar')", timeout=60000)
+            except Exception as e:
+                log.error("Timeout ao carregar a página. Tirando foto para debug...")
+                # Salva um print e o HTML diretamente na pasta mapeada do seu Mac
+                page.screenshot(path="/app/comprovantes/debug_tela_banco.png")
+                with open("/app/comprovantes/debug_banco.html", "w", encoding="utf-8") as f:
+                    f.write(page.content())
+                raise e
+        
             page.wait_for_load_state("domcontentloaded", timeout=60000) # Espera o DOM estar pronto
             log.info("[SUCESSO] Página de Custas carregada!")
 
