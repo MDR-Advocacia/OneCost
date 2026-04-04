@@ -39,6 +39,7 @@ def decimal_to_float(v: Optional[Decimal]) -> Optional[float]:
 # --- Schema para Usuário (Base) ---
 class UserBase(BaseModel):
     username: str = Field(..., min_length=3) # Adiciona validação mínima
+    setor: Optional[str] = None
 
 # Schema para criação (recebe senha, permite role opcional)
 class UserCreate(UserBase):
@@ -59,6 +60,7 @@ class UserUpdate(BaseModel):
     password: Optional[str] = Field(None, min_length=4) # Senha mínima se fornecida
     role: Optional[str] = None
     is_active: Optional[bool] = None # Manter para o endpoint de status ou aqui? Vamos manter aqui por enquanto
+    setor: Optional[str] = None
 
     @field_validator('role')
     @classmethod
@@ -67,12 +69,18 @@ class UserUpdate(BaseModel):
             raise ValueError("Role deve ser 'admin' ou 'user'")
         return v
 
+    @field_validator('setor', mode='before')
+    @classmethod
+    def empty_setor_to_none(cls, v):
+        return None if isinstance(v, str) and not v.strip() else v
+
 
 # Schema para exibir o usuário (resposta da API)
 class User(UserBase):
     id: int
     role: str
     is_active: bool
+    auth_provider: str
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -85,6 +93,11 @@ class SolicitacaoCustaBase(BaseModel):
     npj: str
     numero_processo: Optional[str] = None
     numero_solicitacao: str
+    especificacao: Optional[str] = None
+    status_portal: Optional[str] = None
+    setor_criacao: Optional[str] = None
+    prazo_fatal_em: Optional[datetime] = None
+    monitoramento_ativo: bool = True
     # Usando float para entrada/saída API, validado na entrada
     valor: float
     data_solicitacao: date
@@ -102,6 +115,12 @@ class SolicitacaoCustaUpdate(BaseModel):
     status_robo: Optional[str] = None
     # --- NOVO CAMPO ---
     especificacao: Optional[str] = None # Adicionado para o robô enviar
+    prazo_fatal_em: Optional[datetime] = None
+    proxima_verificacao_em: Optional[datetime] = None
+    alerta_enviado_em: Optional[datetime] = None
+    acao_apos_alerta: Optional[str] = None
+    monitoramento_ativo: Optional[bool] = None
+    motivo_encerramento: Optional[str] = None
     # Recebe lista de strings ou None do robô/api
     comprovantes_path: Optional[List[str]] = None
     # Recebe float ou None, validado no endpoint
@@ -114,7 +133,15 @@ class SolicitacaoCustaUpdate(BaseModel):
     arquivar: Optional[bool] = None  # Flag para arquivar/desarquivar (usado no endpoint /archive)
 
     # Garante que strings vazias sejam None para campos opcionais de string
-    @field_validator('status_portal', 'status_robo', 'numero_processo', 'especificacao', mode='before') # Adicionado 'especificacao'
+    @field_validator(
+        'status_portal',
+        'status_robo',
+        'numero_processo',
+        'especificacao',
+        'acao_apos_alerta',
+        'motivo_encerramento',
+        mode='before'
+    )
     @classmethod
     def empty_str_to_none(cls, v):
         return None if isinstance(v, str) and v.strip() == "" else v
@@ -135,6 +162,12 @@ class SolicitacaoCusta(SolicitacaoCustaBase):
     # --- NOVO CAMPO ---
     especificacao: Optional[str] = None # Adicionado para enviar ao frontend
     ultima_verificacao_robo: Optional[datetime] = None
+    prazo_fatal_em: Optional[datetime] = None
+    proxima_verificacao_em: Optional[datetime] = None
+    alerta_enviado_em: Optional[datetime] = None
+    acao_apos_alerta: Optional[str] = None
+    monitoramento_ativo: bool = True
+    motivo_encerramento: Optional[str] = None
     comprovantes_path: Optional[List[str]] = None # Deveria ser lista na resposta
     # ID e objeto do usuário (robô) que confirmou
     usuario_confirmacao_id: Optional[int] = None

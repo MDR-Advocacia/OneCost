@@ -13,3 +13,29 @@ O objetivo principal do `OneCost` é automatizar o processo de levantamento de c
 * **Python**: Linguagem principal do projeto.
 * **Playwright**: Biblioteca de automação web utilizada para a interação com os portais e sistemas necessários.
 
+## Variáveis de Ambiente
+
+O arquivo `.env` já está ignorado no Git. Para configurar o projeto em ambientes como Coolify/AWS, use o arquivo `.env.example` como referência.
+
+Principais variáveis do backend:
+
+* `DATABASE_URL`
+* `POSTGRES_HOST`
+* `POSTGRES_PORT`
+* `POSTGRES_USER`
+* `SECRET_KEY`
+* `ADMIN_USERNAME`
+* `ADMIN_PASSWORD`
+* `AD_SERVER_IP`
+* `AD_DOMAIN`
+* `AD_BASE_DN`
+* `AD_SERVICE_USER`
+* `AD_SERVICE_PASS`
+
+Compatibilidade com o ecossistema One:
+
+* Se `AD_SERVICE_USER` e `AD_SERVICE_PASS` não forem definidos, o backend usa fallback para `ONELOG_USERNAME` e `ONELOG_PASSWORD`.
+
+Frontend:
+
+* `REACT_APP_API_URL=https://onecost.mdradvocacia.com`

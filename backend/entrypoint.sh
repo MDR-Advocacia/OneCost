@@ -1,5 +1,9 @@
 #!/bin/sh
 
+POSTGRES_HOST="${POSTGRES_HOST:-db}"
+POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+POSTGRES_USER="${POSTGRES_USER:-admin}"
+
 echo "[Entrypoint] Script iniciado."
 
 echo "[Entrypoint] Aguardando o PostgreSQL..."
@@ -8,7 +12,7 @@ sleep 3
 n=0
 until [ $n -ge 20 ]
 do
-  pg_isready -h db -p 5432 -q -U admin && break
+  pg_isready -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT}" -q -U "${POSTGRES_USER}" && break
   n=$((n+1))
   echo "[Entrypoint] PostgreSQL indisponível (tentativa $n/20) - aguardando 1s..."
   sleep 1
@@ -43,6 +47,7 @@ try:
     from bd.database import engine, SessionLocal
     from bd.models import Base, User
     from auth import get_password_hash
+    from config import ADMIN_USERNAME, ADMIN_PASSWORD
     print("[Entrypoint-PY] Módulos importados com sucesso.")
 except ImportError as e:
     print(f"[Entrypoint-PY] ERRO CRÍTICO ao importar módulos: {e}")
@@ -58,6 +63,21 @@ print("[Entrypoint-PY] Aplicando migrações (criando/atualizando tabelas)...")
 try:
     Base.metadata.create_all(bind=engine)
     print("[Entrypoint-PY] Migrações aplicadas com sucesso.")
+    with engine.begin() as conn:
+        conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS setor VARCHAR")
+        conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR DEFAULT 'local'")
+        conn.exec_driver_sql("ALTER TABLE solicitacoes_custas ADD COLUMN IF NOT EXISTS setor_criacao VARCHAR")
+        conn.exec_driver_sql("ALTER TABLE solicitacoes_custas ADD COLUMN IF NOT EXISTS prazo_fatal_em TIMESTAMPTZ")
+        conn.exec_driver_sql("ALTER TABLE solicitacoes_custas ADD COLUMN IF NOT EXISTS proxima_verificacao_em TIMESTAMPTZ")
+        conn.exec_driver_sql("ALTER TABLE solicitacoes_custas ADD COLUMN IF NOT EXISTS alerta_enviado_em TIMESTAMPTZ")
+        conn.exec_driver_sql("ALTER TABLE solicitacoes_custas ADD COLUMN IF NOT EXISTS acao_apos_alerta VARCHAR")
+        conn.exec_driver_sql("ALTER TABLE solicitacoes_custas ADD COLUMN IF NOT EXISTS monitoramento_ativo BOOLEAN DEFAULT TRUE")
+        conn.exec_driver_sql("ALTER TABLE solicitacoes_custas ADD COLUMN IF NOT EXISTS motivo_encerramento VARCHAR")
+        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_users_setor ON users (setor)")
+        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_solicitacoes_custas_setor_criacao ON solicitacoes_custas (setor_criacao)")
+        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_solicitacoes_custas_prazo_fatal_em ON solicitacoes_custas (prazo_fatal_em)")
+        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_solicitacoes_custas_proxima_verificacao_em ON solicitacoes_custas (proxima_verificacao_em)")
+    print("[Entrypoint-PY] Migração leve de colunas de usuário aplicada.")
 except Exception as e:
     print(f"[Entrypoint-PY] ERRO ao aplicar migrações: {e}")
     # Decide-se continuar mesmo se houver erro aqui, pode ser que as tabelas já existam
@@ -67,8 +87,8 @@ db = SessionLocal()
 exit_code = 0
 try:
     # --- Usuário Admin ---
-    admin_user = 'admin'
-    admin_pass = 'admin' # Senha padrão inicial
+    admin_user = ADMIN_USERNAME
+    admin_pass = ADMIN_PASSWORD
     user_exists = db.query(User).filter(User.username == admin_user).first()
     if not user_exists:
         print(f"[Entrypoint-PY] Criando usuário '{admin_user}' com role 'admin'...")

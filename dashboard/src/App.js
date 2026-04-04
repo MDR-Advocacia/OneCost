@@ -81,18 +81,215 @@ const formatValorDisplay = (valor) => {
     }
 };
 
+const normalizeCurrencyString = (rawValue) => {
+    if (!rawValue) return '';
+
+    const cleanedValue = String(rawValue).replace(/[^\d,.-]/g, '').trim();
+    if (!cleanedValue) return '';
+
+    const hasComma = cleanedValue.includes(',');
+    const hasDot = cleanedValue.includes('.');
+
+    if (hasComma && hasDot) {
+        return cleanedValue.replace(/\./g, '').replace(',', '.');
+    }
+
+    if (hasComma) {
+        return cleanedValue.replace(',', '.');
+    }
+
+    return cleanedValue;
+};
+
+const normalizeDateString = (rawValue) => {
+    if (!rawValue) return '';
+
+    const dateValue = String(rawValue).trim();
+
+    const brDateMatch = dateValue.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (brDateMatch) {
+        const [, day, month, year] = brDateMatch;
+        return `${year}-${month}-${day}`;
+    }
+
+    const isoDateMatch = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoDateMatch) {
+        return dateValue;
+    }
+
+    return '';
+};
+
+const toFortalezaIsoString = (dateTimeLocal) => {
+    if (!dateTimeLocal) return null;
+
+    const match = String(dateTimeLocal).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+    if (!match) return null;
+
+    const [, year, month, day, hour, minute] = match;
+    return `${year}-${month}-${day}T${hour}:${minute}:00-03:00`;
+};
+
+const buildStaticDownloadUrl = (relativePath) => {
+    const baseUrl = API_URL.replace(/\/$/, '');
+    const normalizedPath = String(relativePath || '').replace(/^\/+/, '');
+    const encodedPath = normalizedPath
+        .split('/')
+        .filter(Boolean)
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+
+    return `${baseUrl}/static/comprovantes/${encodedPath}`;
+};
+
+const getRobotStatusClass = (statusRobo, isArchived = false, isTratado = false) => {
+    if (isArchived) return 'archived';
+    if (isTratado) return 'finalizado';
+
+    const normalizedStatus = String(statusRobo || 'pendente').toLowerCase();
+    if (normalizedStatus.includes('erro')) return 'erro';
+    if (normalizedStatus.includes('alerta')) return 'alerta';
+    if (normalizedStatus.includes('suspens')) return 'pausado';
+    if (normalizedStatus.includes('monitorando')) return 'pendente';
+    if (normalizedStatus.includes('finalizado')) return 'finalizado';
+    return 'pendente';
+};
+
+const getPortalStatusClass = (statusPortal) => {
+    const normalizedStatus = String(statusPortal || '').toLowerCase();
+    if (!normalizedStatus) return 'neutro';
+    if (
+        normalizedStatus.includes('cancel') ||
+        normalizedStatus.includes('reprov') ||
+        normalizedStatus.includes('recus') ||
+        normalizedStatus.includes('devolv')
+    ) {
+        return 'erro';
+    }
+    if (
+        normalizedStatus.includes('efetivad') ||
+        normalizedStatus.includes('liquid')
+    ) {
+        return 'finalizado';
+    }
+    if (
+        normalizedStatus.includes('aguardando') ||
+        normalizedStatus.includes('processamento')
+    ) {
+        return 'pendente';
+    }
+    return 'neutro';
+};
+
+const getPrazoFatalState = (prazoFatalEm, statusRobo) => {
+    if (!prazoFatalEm) return 'none';
+
+    const prazoDate = new Date(prazoFatalEm);
+    if (Number.isNaN(prazoDate.getTime())) return 'none';
+
+    const robotStatus = String(statusRobo || '').toLowerCase();
+    if (robotStatus.includes('finalizado')) return 'safe';
+
+    const now = new Date();
+    const diffMs = prazoDate.getTime() - now.getTime();
+    if (diffMs <= 0) return 'expired';
+    if (diffMs <= 6 * 60 * 60 * 1000) return 'critical';
+    if (diffMs <= 24 * 60 * 60 * 1000) return 'warning';
+    return 'safe';
+};
+
+const splitTabbedLine = (text) => String(text || '')
+    .split(/\t+/)
+    .map((part) => part.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+const parseSolicitacaoPaste = (text) => {
+    const rawText = String(text || '');
+    const normalizedText = rawText.replace(/\s+/g, ' ').trim();
+    if (!normalizedText) {
+        throw new Error('Cole uma linha com os dados para preencher automaticamente.');
+    }
+
+    const tabParts = splitTabbedLine(rawText);
+    if (tabParts.length >= 6) {
+        const [npj, numeroSolicitacao, tribunal, especificacao, statusPortal, dataSolicitacao, ...rest] = tabParts;
+        const valorTexto = rest.join(' ').trim();
+
+        return {
+            npj: npj || '',
+            numeroProcesso: '',
+            numeroSolicitacao: numeroSolicitacao || '',
+            tribunal: tribunal || '',
+            especificacao: especificacao || '',
+            statusPortal: statusPortal || '',
+            valor: normalizeCurrencyString(valorTexto),
+            dataSolicitacao: normalizeDateString(dataSolicitacao || '')
+        };
+    }
+
+    const processMatch = normalizedText.match(/\d{7}-\d{2}\.\d{4}\.\d(?:\.\d{2})?\.\d{4}/);
+    const npjMatch = normalizedText.match(/\b[\d/-]{4,}\b/);
+
+    const solicitationRegexes = [
+        /solicita(?:c|ç)(?:a|ã)o[:\s#-]*([A-Za-z0-9./-]{4,})/i,
+        /(?:n[º°o.]?\s*)?solicita(?:c|ç)(?:a|ã)o[:\s#-]*([A-Za-z0-9./-]{4,})/i
+    ];
+    const solicitationMatch = solicitationRegexes
+        .map((regex) => normalizedText.match(regex))
+        .find(Boolean);
+
+    const currencyMatches = [...normalizedText.matchAll(/\b\d{1,3}(?:\.\d{3})*,\d{2}\b|\b\d+\.\d{2}\b|\b\d+,\d{2}\b/g)];
+    const lastCurrency = currencyMatches.length > 0 ? currencyMatches[currencyMatches.length - 1][0] : '';
+    const dateMatch = normalizedText.match(/\b\d{2}\/\d{2}\/\d{4}\b|\b\d{4}-\d{2}-\d{2}\b/);
+
+    const fallbackNumbers = normalizedText.match(/\b\d{4,}\b/g) || [];
+    const solicitationFallback = fallbackNumbers.find((item) => item !== npjMatch?.[0] && item !== processMatch?.[0]);
+
+    return {
+        npj: npjMatch?.[0] || '',
+        numeroProcesso: processMatch?.[0] || '',
+        tribunal: '',
+        especificacao: '',
+        statusPortal: '',
+        numeroSolicitacao: solicitationMatch?.[1] || solicitationFallback || '',
+        valor: normalizeCurrencyString(lastCurrency),
+        dataSolicitacao: normalizeDateString(dateMatch?.[0] || '')
+    };
+};
+
 // --- COMPONENTE DO FORMULÁRIO (SolicitacaoForm) ---
 const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
-    const [npj, setNpj] = useState('');
-    const [numeroProcesso, setNumeroProcesso] = useState('');
-    const [numeroSolicitacao, setNumeroSolicitacao] = useState('');
-    const [valor, setValor] = useState(''); // Manter como string para o input aceitar vírgula
-    const [dataSolicitacao, setDataSolicitacao] = useState(new Date().toISOString().split('T')[0]);
-    // Mantido o nome original: Indica se o *usuário* marcou que precisa de confirmação no portal
-    const [precisaConfirmacaoUsuario, setPrecisaConfirmacaoUsuario] = useState(true);
+    const [linhaCopiada, setLinhaCopiada] = useState('');
+    const [parsedSolicitacao, setParsedSolicitacao] = useState(null);
+    const [prazoFatal, setPrazoFatal] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [success, setSuccess] = useState('');
+
+    useEffect(() => {
+        if (!linhaCopiada.trim()) {
+            setParsedSolicitacao(null);
+            setError('');
+            return;
+        }
+
+        try {
+            const parsed = parseSolicitacaoPaste(linhaCopiada);
+
+            if (!parsed.npj || !parsed.numeroSolicitacao || !parsed.valor || !parsed.dataSolicitacao) {
+                throw new Error('Não consegui reconhecer todos os campos obrigatórios da linha: NPJ, número da solicitação, data e valor.');
+            }
+
+            setParsedSolicitacao({
+                ...parsed,
+                aguardandoConfirmacao: true
+            });
+            setError('');
+        } catch (err) {
+            setParsedSolicitacao(null);
+            setError(err.message || 'Não foi possível interpretar a linha colada.');
+        }
+    }, [linhaCopiada]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -100,49 +297,49 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
         setError('');
         setSuccess('');
 
-        // Validação básica do valor (aceita vírgula ou ponto, converte para número)
+        if (!parsedSolicitacao) {
+            setError('Cole uma linha válida para confirmar e salvar.');
+            setIsLoading(false);
+            return;
+        }
+
         let valorFloat;
         try {
-             const valorLimpo = valor.trim().replace(',', '.');
-             // Permite apenas dígitos, um ponto/vírgula opcional e até 2 casas decimais
-             // Permite valor vazio ou apenas 0
-             if (valor.trim() !== '' && !/^\d+([.,]\d{1,2})?$/.test(valor.trim()) ) {
+             const valorLimpo = parsedSolicitacao.valor.trim().replace(',', '.');
+             if (valorLimpo !== '' && !/^\d+([.,]\d{1,2})?$/.test(valorLimpo) ) {
                  throw new Error("Formato de valor inválido. Use 1234.56 ou 1234,56.");
              }
-             valorFloat = valorLimpo === '' ? 0.0 : parseFloat(valorLimpo); // Converte vazio para 0.0
+             valorFloat = valorLimpo === '' ? 0.0 : parseFloat(valorLimpo);
              if (isNaN(valorFloat)) {
                  throw new Error("Valor não é um número válido.");
              }
-             // Arredonda para garantir 2 casas decimais
              valorFloat = Math.round(valorFloat * 100) / 100;
-
         } catch (err) {
             setError(err.message || 'Valor inválido.');
             setIsLoading(false);
             return;
         }
 
-
         try {
             const dados = {
-                npj: npj.trim(),
-                numero_processo: numeroProcesso.trim() || null, // Envia null se vazio
-                numero_solicitacao: numeroSolicitacao.trim(),
-                valor: valorFloat, // Envia o número validado
-                data_solicitacao: dataSolicitacao,
-                aguardando_confirmacao: precisaConfirmacaoUsuario // Nome do campo na API
+                npj: parsedSolicitacao.npj.trim(),
+                numero_processo: parsedSolicitacao.numeroProcesso?.trim() || null,
+                numero_solicitacao: parsedSolicitacao.numeroSolicitacao.trim(),
+                especificacao: parsedSolicitacao.especificacao?.trim() || null,
+                status_portal: parsedSolicitacao.statusPortal?.trim() || null,
+                prazo_fatal_em: toFortalezaIsoString(prazoFatal),
+                monitoramento_ativo: true,
+                valor: valorFloat,
+                data_solicitacao: parsedSolicitacao.dataSolicitacao,
+                aguardando_confirmacao: parsedSolicitacao.aguardandoConfirmacao
             };
             await createSolicitacao(dados);
             setSuccess('Solicitação criada com sucesso!');
-            // Limpa o formulário
-            setNpj('');
-            setNumeroProcesso('');
-            setNumeroSolicitacao('');
-            setValor(''); // Limpa a string do valor
-            setDataSolicitacao(new Date().toISOString().split('T')[0]);
-            setPrecisaConfirmacaoUsuario(true);
-            setTimeout(() => setSuccess(''), 3000); // Limpa mensagem de sucesso
-            if(onSolicitacaoCriada) onSolicitacaoCriada(); // Atualiza a lista principal
+            setLinhaCopiada('');
+            setParsedSolicitacao(null);
+            setPrazoFatal('');
+            setTimeout(() => setSuccess(''), 3000);
+            if(onSolicitacaoCriada) onSolicitacaoCriada();
         } catch (err) {
              const detail = err.response?.data?.detail;
              let message = 'Erro ao criar solicitação.';
@@ -164,51 +361,90 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
     return (
         <div className="card">
             <h2>Adicionar Solicitação</h2>
-            <form onSubmit={handleSubmit} className="solicitacao-form-inline">
-                <div className="form-group">
-                    <label htmlFor="npj">NPJ *</label>
-                    <input id="npj" type="text" value={npj} onChange={(e) => setNpj(e.target.value)} placeholder="NPJ" required />
+            <form onSubmit={handleSubmit} className="solicitacao-paste-form">
+            <div className="paste-helper">
+                <label htmlFor="linhaCopiada">Colar linha completa</label>
+                <div className="paste-helper-controls">
+                    <textarea
+                        id="linhaCopiada"
+                        value={linhaCopiada}
+                        onChange={(e) => setLinhaCopiada(e.target.value)}
+                        placeholder="Cole aqui a linha completa para extrair NPJ, processo, solicitação e valor"
+                        rows={2}
+                    />
                 </div>
-                <div className="form-group">
-                     <label htmlFor="numeroProcesso">Nº Processo (Opcional)</label>
-                    <input id="numeroProcesso" type="text" value={numeroProcesso} onChange={(e) => setNumeroProcesso(e.target.value)} placeholder="Número do Processo" />
+                <small className="form-hint">
+                    Formato com tabs: NPJ [TAB] Nº Solicitação [TAB] Tribunal [TAB] Especificação [TAB] Status [TAB] Data [TAB] Valor
+                </small>
+            </div>
+            {parsedSolicitacao && (
+                <div className="recognized-line">
+                    <p className="recognized-line-title">Informacoes reconhecidas para envio</p>
+                    <p className="recognized-line-text">
+                        <strong>NPJ:</strong> {parsedSolicitacao.npj}
+                        {' | '}
+                        <strong>Solicitacao:</strong> {parsedSolicitacao.numeroSolicitacao}
+                        {parsedSolicitacao.tribunal && (
+                            <>
+                                {' | '}
+                                <strong>Tribunal:</strong> {parsedSolicitacao.tribunal}
+                            </>
+                        )}
+                        {parsedSolicitacao.especificacao && (
+                            <>
+                                {' | '}
+                                <strong>Especificacao:</strong> {parsedSolicitacao.especificacao}
+                            </>
+                        )}
+                        {parsedSolicitacao.statusPortal && (
+                            <>
+                                {' | '}
+                                <strong>Status:</strong> {parsedSolicitacao.statusPortal}
+                            </>
+                        )}
+                        {' | '}
+                        <strong>Data:</strong> {formatDataHora(parsedSolicitacao.dataSolicitacao)}
+                        {' | '}
+                        <strong>Valor:</strong> {formatValorDisplay(parsedSolicitacao.valor)}
+                        {' | '}
+                        <strong>Status Banco:</strong> {parsedSolicitacao.statusPortal || 'Nao informado'}
+                        {' | '}
+                        <strong>Status Robo inicial:</strong> Pendente
+                        {' | '}
+                        <strong>Confirmacao Portal:</strong> Sim
+                        {prazoFatal && (
+                            <>
+                                {' | '}
+                                <strong>Prazo Fatal:</strong> {formatDataHora(toFortalezaIsoString(prazoFatal))}
+                            </>
+                        )}
+                    </p>
                 </div>
+            )}
+            <div className="deadline-config-grid">
                 <div className="form-group">
-                     <label htmlFor="numeroSolicitacao">Nº Solicitação *</label>
-                    <input id="numeroSolicitacao" type="text" value={numeroSolicitacao} onChange={(e) => setNumeroSolicitacao(e.target.value)} placeholder="Número da Solicitação" required />
-                </div>
-                 <div className="form-group">
-                     <label htmlFor="valor">Valor (Ex: 123,45) *</label>
+                    <label htmlFor="prazoFatal">Prazo fatal para comprovante</label>
                     <input
-                        id="valor"
-                        type="text"
-                        value={valor}
-                        onChange={(e) => setValor(e.target.value)}
-                        placeholder="Valor"
-                        required
-                        inputMode="decimal"
-                     />
+                        id="prazoFatal"
+                        type="datetime-local"
+                        value={prazoFatal}
+                        onChange={(e) => setPrazoFatal(e.target.value)}
+                        className="date-input-style"
+                    />
+                    <small className="form-hint">Comparacao feita no fuso GMT-3 (America/Fortaleza). Ex.: 01/02 as 15:00.</small>
                 </div>
-                <div className="form-group">
-                    <label htmlFor="dataSolicitacao">Data Solicitação *</label>
-                    <input id="dataSolicitacao" type="date" value={dataSolicitacao} onChange={(e) => setDataSolicitacao(e.target.value)} required className="date-input-style"/>
+            </div>
+            <div className="submit-row">
+                <button type="submit" disabled={isLoading || !parsedSolicitacao} className="button primary confirm-submit-button">
+                    {isLoading ? 'Enviando...' : 'Confirmar e Enviar Solicitação'}
+                </button>
+            </div>
+            {(error || success) && (
+                <div className="form-message-container">
+                    {error && <p className="form-message error">{error}</p>}
+                    {success && <p className="form-message success">{success}</p>}
                 </div>
-                <div className="form-group checkbox-container form-group-inline-checkbox"> {/* Classe para alinhar */}
-                    <input id="precisaConfirmacaoUsuario" type="checkbox" checked={precisaConfirmacaoUsuario} onChange={(e) => setPrecisaConfirmacaoUsuario(e.target.checked)} />
-                    <label htmlFor="precisaConfirmacaoUsuario">Confirmação Portal?</label>
-                </div>
-                <div className="form-group-button"> {/* Container para o botão */}
-                    <button type="submit" disabled={isLoading} className="button primary">
-                        {isLoading ? 'Salvando...' : 'Salvar'}
-                    </button>
-                </div>
-                {/* Mensagens de erro/sucesso abaixo dos campos */}
-                {(error || success) && (
-                    <div className="form-message-container">
-                        {error && <p className="form-message error">{error}</p>}
-                        {success && <p className="form-message success">{success}</p>}
-                    </div>
-                )}
+            )}
             </form>
         </div>
     );
@@ -687,7 +923,8 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
 
     // --- Estados para Paginação ---
     const [currentPage, setCurrentPage] = useState(1);
-    const [itemsPerPage] = useState(10); // Itens por página
+    const [itemsPerPage, setItemsPerPage] = useState(10);
+    const [pageInput, setPageInput] = useState('1');
 
     // --- Filtragem ---
     const filteredSolicitacoes = useMemo(() => {
@@ -735,16 +972,37 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
     const paginate = (pageNumber) => {
         if (pageNumber >= 1 && pageNumber <= totalPages) {
             setCurrentPage(pageNumber);
+            setPageInput(String(pageNumber));
         }
     };
 
     const handleNextPage = () => paginate(currentPage + 1);
     const handlePrevPage = () => paginate(currentPage - 1);
+    const handleItemsPerPageChange = (event) => {
+        const nextItemsPerPage = parseInt(event.target.value, 10);
+        setItemsPerPage(nextItemsPerPage);
+        setCurrentPage(1);
+        setPageInput('1');
+    };
+    const handlePageInputSubmit = (event) => {
+        event.preventDefault();
+        const requestedPage = parseInt(pageInput, 10);
+        if (Number.isNaN(requestedPage)) {
+            setPageInput(String(currentPage));
+            return;
+        }
+        paginate(requestedPage);
+    };
 
     // Reset page number when filters change externally (via props) or internally
     useEffect(() => {
         setCurrentPage(1);
-    }, [filterNpj, filterProcesso, filterStartDate, filterEndDate, currentFilters]);
+        setPageInput('1');
+    }, [filterNpj, filterProcesso, filterStartDate, filterEndDate, currentFilters, itemsPerPage]);
+
+    useEffect(() => {
+        setPageInput(String(currentPage));
+    }, [currentPage]);
 
 
     // Fechar Menu Dropdown ao clicar fora
@@ -826,10 +1084,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
 
         return links.map((link, index) => {
             const nomeArquivo = link.split(/[\\/]/).pop() || `Arquivo ${index + 1}`;
-            const staticPath = "static/comprovantes";
-             // Remove barras iniciais extras e garante uma única barra
-             const cleanLink = link.replace(/^\/+/, '');
-             const downloadUrl = `${API_URL.replace(/\/$/, '')}/${staticPath}/${cleanLink}`;
+            const downloadUrl = buildStaticDownloadUrl(link);
 
 
             // Determina o tipo pelo nome (heurística)
@@ -853,14 +1108,6 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
         });
     };
 
-    // Define a classe CSS para o indicador de status do robô
-     const getRoboStatusClass = (statusRobo) => {
-        const s = (statusRobo || 'pendente').toLowerCase();
-        if (s.includes('erro')) { return 'erro'; }
-        if (s.includes('finalizado')) { return 'finalizado'; }
-        return 'pendente'; // Pendente, Aguardando, etc.
-    };
-
     // --- Ações do Modal ---
     const handleResetPendente = async () => {
         if (!selectedSolicitacao || isModalLoading) return;
@@ -875,7 +1122,11 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                 status_portal: null, // Limpa status do portal
                 ultima_verificacao_robo: null, // Limpa última verificação
                 usuario_confirmacao_id: null, // Limpa confirmação se houve
-                especificacao: null // Limpa especificacao
+                especificacao: null, // Limpa especificacao
+                proxima_verificacao_em: null,
+                alerta_enviado_em: null,
+                motivo_encerramento: null,
+                monitoramento_ativo: true
             });
             triggerRefresh(); // Atualiza a lista com filtros atuais
             closeModal();
@@ -955,27 +1206,35 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                             <th className="th-narrow">Nº</th> {/* Cabeçalho ajustado */}
                             <th className="th-valor">Valor</th> {/* Classe para alinhamento */}
                             <th>Data Solicitação</th>
+                            <th>Prazo Fatal</th>
                             <th>Criado Por</th>
-                            <th style={{minWidth: '200px'}}>Status</th> {/* Largura mínima p/ status */}
+                            <th style={{minWidth: '220px'}}>Status Banco</th>
+                            <th style={{minWidth: '220px'}}>Status Robô</th>
                             <th style={{textAlign: 'center'}}>Ações</th>
                         </tr>
                     </thead>
                     <tbody>
                         {currentSolicitacoes.length > 0 ? (
                             currentSolicitacoes.map(item => {
-                                const statusRoboClasse = getRoboStatusClass(item.status_robo);
-                                let statusText = item.status_robo || 'Pendente';
-                                // Prioriza finalizado/tratado
-                                if(item.usuario_finalizacao) { statusText = `Tratado (${item.usuario_finalizacao.username})`; }
-                                // Sobrescreve se arquivado
-                                else if(item.is_archived) { statusText = `(Arquivado)`; }
-                                // Se não for nenhum dos acima, usa o status do portal se existir
-                                else if (item.status_portal) { statusText = item.status_portal; }
+                                const statusRoboClasse = getRobotStatusClass(item.status_robo, item.is_archived, Boolean(item.usuario_finalizacao_id));
+                                const statusPortalClasse = getPortalStatusClass(item.status_portal);
+                                const prazoFatalState = getPrazoFatalState(item.prazo_fatal_em, item.status_robo);
 
-                                // Define o título (tooltip) para o status
-                                let statusTitle = `Robô: ${item.status_robo || 'Pendente'} | Portal: ${item.status_portal || 'N/A'}`;
-                                if (item.usuario_finalizacao) { statusTitle = `Tratado por ${item.usuario_finalizacao.username} em ${formatDataHora(item.data_finalizacao)}`; }
-                                if (item.is_archived) { statusTitle = `Arquivado por ${item.usuario_arquivamento?.username || 'Admin'} em ${formatDataHora(item.data_arquivamento)}`; }
+                                let statusRoboText = item.status_robo || 'Pendente';
+                                if (item.usuario_finalizacao) {
+                                    statusRoboText = `Tratado por ${item.usuario_finalizacao.username}`;
+                                } else if (item.is_archived) {
+                                    statusRoboText = 'Arquivado';
+                                }
+
+                                const statusRoboTitle = item.usuario_finalizacao
+                                    ? `Tratado por ${item.usuario_finalizacao.username} em ${formatDataHora(item.data_finalizacao)}`
+                                    : item.is_archived
+                                        ? `Arquivado por ${item.usuario_arquivamento?.username || 'Admin'} em ${formatDataHora(item.data_arquivamento)}`
+                                        : item.status_robo || 'Pendente';
+
+                                const statusPortalTitle = item.status_portal || 'Nenhum retorno do banco até o momento';
+                                const prazoFatalLabel = item.prazo_fatal_em ? formatDataHora(item.prazo_fatal_em) : 'Nao definido';
 
 
                                 return (
@@ -984,18 +1243,33 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                         <td className="td-narrow">{item.numero_solicitacao}</td> {/* Estilo aplicado */}
                                         <td className="td-valor">{formatValorDisplay(item.valor)}</td> {/* Estilo aplicado */}
                                         <td>{formatDataHora(item.data_solicitacao)}</td>
+                                        <td>
+                                            <span className={`deadline-chip deadline-${prazoFatalState}`} title={prazoFatalLabel}>
+                                                {prazoFatalLabel}
+                                            </span>
+                                        </td>
                                         <td>{item.usuario_criacao?.username || 'N/A'}</td>
                                         <td>
-                                          <div className="status-cell">
-                                            {/* Mostra bolinha apenas se não estiver arquivado ou tratado */}
+                                          <div className="status-cell status-cell-stacked">
+                                            <span
+                                              className={`status-indicator status-${statusPortalClasse}`}
+                                              title={statusPortalTitle}
+                                            ></span>
+                                            <span className="status-text" title={statusPortalTitle}>
+                                              {item.status_portal || 'Sem retorno do banco'}
+                                            </span>
+                                          </div>
+                                        </td>
+                                        <td>
+                                          <div className="status-cell status-cell-stacked">
                                             {!item.is_archived && !item.usuario_finalizacao_id && (
                                                 <span
                                                   className={`status-indicator status-${statusRoboClasse}`}
-                                                  title={statusTitle} // Tooltip com mais detalhes
+                                                  title={statusRoboTitle}
                                                 ></span>
                                              )}
-                                            <span className="status-text" title={statusTitle}>
-                                              {statusText}
+                                            <span className="status-text" title={statusRoboTitle}>
+                                              {statusRoboText}
                                             </span>
                                           </div>
                                         </td>
@@ -1007,16 +1281,47 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                     </tr>
                                 );
                             })
-                        ) : ( <tr><td colSpan="7" className="table-empty-message">Nenhuma solicitação encontrada com os filtros aplicados.</td></tr> )}
+                        ) : ( <tr><td colSpan="9" className="table-empty-message">Nenhuma solicitação encontrada com os filtros aplicados.</td></tr> )}
                     </tbody>
                 </table>
              </div>
+             <p className="table-status-legend">
+                <strong>Status Banco</strong>: ultimo retorno lido no portal do banco.{' '}
+                <strong>Status Robô</strong>: etapa interna controlada pelo OneCost para monitoramento, alertas e tratamento.
+             </p>
 
              {/* Paginação */}
              {totalPages > 1 && (
                 <div className="pagination-controls">
+                    <div className="pagination-config">
+                        <label htmlFor="itemsPerPage" className="pagination-label">Itens por página</label>
+                        <select
+                            id="itemsPerPage"
+                            value={itemsPerPage}
+                            onChange={handleItemsPerPageChange}
+                            className="pagination-select"
+                        >
+                            <option value={10}>10</option>
+                            <option value={25}>25</option>
+                            <option value={50}>50</option>
+                            <option value={100}>100</option>
+                        </select>
+                    </div>
                     <button onClick={handlePrevPage} disabled={currentPage === 1} className="pagination-button">Anterior</button>
                     <span className="pagination-info">Página {currentPage} de {totalPages} ({filteredSolicitacoes.length} itens)</span>
+                    <form onSubmit={handlePageInputSubmit} className="pagination-jump-form">
+                        <label htmlFor="pageInput" className="pagination-label">Ir para</label>
+                        <input
+                            id="pageInput"
+                            type="number"
+                            min={1}
+                            max={totalPages}
+                            value={pageInput}
+                            onChange={(event) => setPageInput(event.target.value)}
+                            className="pagination-input"
+                        />
+                        <button type="submit" className="pagination-button">Ir</button>
+                    </form>
                     <button onClick={handleNextPage} disabled={currentPage === totalPages} className="pagination-button">Próxima</button>
                 </div>
              )}
@@ -1084,6 +1389,22 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                 <p><strong className="modal-label">Data:</strong> {formatDataHora(selectedSolicitacao.data_solicitacao)}</p>
                              </div>
 
+                             <div className="modal-detail-line">
+                                <p><strong className="modal-label">Status do Banco:</strong> <span className={`modal-status-text status-${getPortalStatusClass(selectedSolicitacao.status_portal)}`}>{selectedSolicitacao.status_portal || 'Sem retorno do banco'}</span></p>
+                                <p><strong className="modal-label">Status do Robô:</strong> <span className={`modal-status-text status-${getRobotStatusClass(selectedSolicitacao.status_robo, selectedSolicitacao.is_archived, Boolean(selectedSolicitacao.usuario_finalizacao_id))}`}>{selectedSolicitacao.status_robo || 'Pendente'}</span></p>
+                             </div>
+
+                             <div className="modal-detail-line">
+                                <p><strong className="modal-label">Prazo Fatal:</strong> {formatDataHora(selectedSolicitacao.prazo_fatal_em)}</p>
+                                <p><strong className="modal-label">Próxima Verificação:</strong> {formatDataHora(selectedSolicitacao.proxima_verificacao_em)}</p>
+                                <p><strong className="modal-label">Alerta Enviado:</strong> {formatDataHora(selectedSolicitacao.alerta_enviado_em)}</p>
+                             </div>
+
+                             <div className="modal-detail-line">
+                                <p><strong className="modal-label">Monitoramento:</strong> {selectedSolicitacao.monitoramento_ativo ? 'Ativo' : 'Suspenso'}</p>
+                                <p><strong className="modal-label">Motivo Encerramento:</strong> {selectedSolicitacao.motivo_encerramento || 'N/A'}</p>
+                             </div>
+
                              <div className="modal-detail-line user-info-line">
                                 <p><strong className="modal-label-sm">Criado por:</strong> {selectedSolicitacao.usuario_criacao?.username || 'N/A'}</p>
                                 <p><strong className="modal-label-sm">Tratado por:</strong> {selectedSolicitacao.usuario_finalizacao?.username || 'Não'} {selectedSolicitacao.data_finalizacao ? `em ${formatDataHora(selectedSolicitacao.data_finalizacao)}` : ''}</p>
@@ -1104,9 +1425,10 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                 {showRobotInfo && (
                                     <div className="accordion-content">
                                         <p><strong className="modal-label-alt">Confirmação Solicitada:</strong> {selectedSolicitacao.aguardando_confirmacao ? 'Sim' : 'Não'}</p>
-                                        <p><strong className="modal-label-alt">Status Robô:</strong> {selectedSolicitacao.status_robo || 'Pendente'}</p>
-                                        <p><strong className="modal-label-alt">Status Portal (último):</strong> {selectedSolicitacao.status_portal || 'N/A'}</p>
+                                        <p><strong className="modal-label-alt">Status Robô (nosso sistema):</strong> {selectedSolicitacao.status_robo || 'Pendente'}</p>
+                                        <p><strong className="modal-label-alt">Status Portal (banco):</strong> {selectedSolicitacao.status_portal || 'N/A'}</p>
                                         <p><strong className="modal-label-alt">Última Verificação:</strong> {formatDataHora(selectedSolicitacao.ultima_verificacao_robo)}</p>
+                                        <p><strong className="modal-label-alt">Próxima Verificação:</strong> {formatDataHora(selectedSolicitacao.proxima_verificacao_em)}</p>
                                         <p><strong className="modal-label-alt">Confirmado (Robô) por:</strong> {selectedSolicitacao.usuario_confirmacao?.username || 'N/A'}</p>
                                     </div>
                                 )}
@@ -1150,7 +1472,7 @@ function App() {
     // <<< NOVO: Estado para os filtros >>>
     const [filters, setFilters] = useState({
         includeArchived: false,
-        userFilter: 'all' // 'all' ou 'me'
+        userFilter: 'me' // 'me', 'sector' ou 'all'
     });
 
     // Função de Logout - precisa ser definida antes de ser usada no useCallback
@@ -1161,7 +1483,7 @@ function App() {
         setCurrentUser(null);
         setSolicitacoes([]);
         setError('');
-        setFilters({ includeArchived: false, userFilter: 'all' }); // Reseta filtros no logout
+        setFilters({ includeArchived: false, userFilter: 'me' }); // Reseta filtros no logout
         setIsLoading(false); // Garante que não fique carregando
         setIsAdminModalOpen(false); // Fecha modal admin ao deslogar
     }, []); // useCallback sem dependências
@@ -1191,9 +1513,11 @@ function App() {
             }
 
             console.log("[App] Buscando solicitações com filtros:", currentFilters);
-            // Determina o userId a ser passado para a API
-            const userIdParam = currentFilters.userFilter === 'me' ? userToUse.id : null;
-            const solicitacoesResponse = await getSolicitacoes(currentFilters.includeArchived, userIdParam);
+            const normalizedScope = userToUse.role === 'admin'
+                ? (currentFilters.userFilter || 'all')
+                : (currentFilters.userFilter === 'sector' ? 'sector' : 'me');
+            const userIdParam = normalizedScope === 'me' ? userToUse.id : null;
+            const solicitacoesResponse = await getSolicitacoes(currentFilters.includeArchived, userIdParam, normalizedScope);
             console.log("[App] Solicitações recebidas:", solicitacoesResponse);
             // Ordena por ID decrescente
             setSolicitacoes(solicitacoesResponse.sort((a, b) => b.id - a.id));
@@ -1231,8 +1555,19 @@ function App() {
         const token = localStorage.getItem('token');
         if (token) {
             console.log("[App useEffect] Token encontrado. Buscando dados iniciais...");
-            // Não seta isLoading aqui, fetchData faz isso
-            fetchData(filters); // Busca inicial com filtros padrão
+            setIsLoading(true);
+            getCurrentUser().then(user => {
+                setCurrentUser(user);
+                const initialFilters = {
+                    includeArchived: false,
+                    userFilter: user.role === 'admin' ? 'all' : 'me'
+                };
+                setFilters(initialFilters);
+                return fetchData(initialFilters);
+            }).catch(err => {
+                console.error("[App useEffect] Falha ao recuperar usuário inicial:", err);
+                handleLogout();
+            });
         } else {
             console.log("[App useEffect] Nenhum token. Indo para login.");
             setIsLoading(false); // Não está carregando se não tem token
@@ -1247,11 +1582,14 @@ function App() {
     const handleLoginSuccess = useCallback((loginData) => {
         console.log("[App] Login OK. Iniciando busca de dados pós-login...");
         setIsLoading(true); // Mostra carregando enquanto busca dados
-        const initialFilters = { includeArchived: false, userFilter: 'all' }; // Define filtros iniciais
-        setFilters(initialFilters); // Reseta filtros no login
         // Primeiro busca o usuário, depois busca os dados com base nele e nos filtros
         getCurrentUser().then(user => {
+            const initialFilters = {
+                includeArchived: false,
+                userFilter: user.role === 'admin' ? 'all' : 'me'
+            };
             setCurrentUser(user); // Define o usuário atual
+            setFilters(initialFilters); // Reseta filtros no login
             return fetchData(initialFilters); // Busca as solicitações com filtros iniciais
         }).catch(err => {
             console.error("Erro pós-login ao buscar usuário:", err);
@@ -1308,7 +1646,7 @@ function App() {
                             <AdminIcon /> Admin
                         </button>
                     )}
-                    <span>Olá, {currentUser?.username} ({currentUser?.role})</span>
+                    <span>Olá, {currentUser?.username} ({currentUser?.role}{currentUser?.setor ? ` - ${currentUser.setor}` : ''})</span>
                     <button onClick={handleLogout} className="button logout-button">Sair</button>
                 </div>
             </header>
@@ -1328,17 +1666,6 @@ function App() {
                              <input
                                  type="radio"
                                  name="userFilter"
-                                 value="all"
-                                 checked={filters.userFilter === 'all'}
-                                 onChange={handleUserFilterChange}
-                                 disabled={isLoading} // Desabilita durante carregamento
-                             />
-                             Todas
-                         </label>
-                         <label>
-                             <input
-                                 type="radio"
-                                 name="userFilter"
                                  value="me"
                                  checked={filters.userFilter === 'me'}
                                  onChange={handleUserFilterChange}
@@ -1346,6 +1673,31 @@ function App() {
                              />
                              Minhas Solicitações
                          </label>
+                         {currentUser?.role === 'admin' ? (
+                             <label>
+                                 <input
+                                     type="radio"
+                                     name="userFilter"
+                                     value="all"
+                                     checked={filters.userFilter === 'all'}
+                                     onChange={handleUserFilterChange}
+                                     disabled={isLoading}
+                                 />
+                                 Todas
+                             </label>
+                         ) : (
+                             <label>
+                                 <input
+                                     type="radio"
+                                     name="userFilter"
+                                     value="sector"
+                                     checked={filters.userFilter === 'sector'}
+                                     onChange={handleUserFilterChange}
+                                     disabled={isLoading}
+                                 />
+                                 Meu Setor
+                             </label>
+                         )}
                      </div>
                      {/* Botão de Refresh Manual 
                      <button
@@ -1384,4 +1736,3 @@ function App() {
 }
 
 export default App;
-

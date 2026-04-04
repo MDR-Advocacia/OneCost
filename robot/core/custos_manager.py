@@ -79,16 +79,20 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
         valor_bd = Decimal("0.0")
 
     # Estrutura do resultado a ser retornado para a API
-    resultado_final = {
-        "solicitacao_id": solicitacao_id,
-        "numero_processo": numero_processo_bd, # Inicia com o valor do BD, será atualizado se encontrado
-        "especificacao": None, # Campo para a especificação
-        "comprovantes_path": [], # Lista de caminhos relativos (NOME CORRETO PARA A API)
-        "status_portal": None, # Status lido do portal (o último lido)
-        "status_robo": "Erro: Falha não especificada", # Status final para o OneCost (NOME CORRETO)
-        "usuario_confirmacao_id": None, # ID do robô se ele confirmar
-        "dados_custas_encontrados_debug": {} # Dados lidos da linha da tabela (mantido para logs/debug)
-    }
+        resultado_final = {
+            "solicitacao_id": solicitacao_id,
+            "numero_processo": numero_processo_bd, # Inicia com o valor do BD, será atualizado se encontrado
+            "especificacao": None, # Campo para a especificação
+            "comprovantes_path": [], # Lista de caminhos relativos (NOME CORRETO PARA A API)
+            "status_portal": None, # Status lido do portal (o último lido)
+            "status_robo": "Erro: Falha não especificada", # Status final para o OneCost (NOME CORRETO)
+            "usuario_confirmacao_id": None, # ID do robô se ele confirmar
+            "monitoramento_ativo": True,
+            "motivo_encerramento": None,
+            "proxima_verificacao_em": None,
+            "alerta_enviado_em": None,
+            "dados_custas_encontrados_debug": {} # Dados lidos da linha da tabela (mantido para logs/debug)
+        }
 
     logging.info(f"Iniciando processamento para Solicitação ID: {solicitacao_id}, NPJ: {npj_para_buscar}")
 
@@ -258,6 +262,20 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
         status_de_confirmacao = [
             "Aguardando Confirmação"
         ]
+        status_de_monitoramento = [
+            "Aguardando Efetivação"
+        ]
+        # Status negativos/terminais do portal: não devem voltar para Pendente
+        status_negativos = [
+            "Cancelado",
+            "Indeferido",
+            "Devolvido para Ajustes"
+        ]
+        status_portal_normalizado = (status_portal_inicial or "").strip()
+        status_portal_invalido = (
+            not status_portal_normalizado or
+            bool(re.fullmatch(r"\d{2}/\d{2}/\d{4}", status_portal_normalizado))
+        )
 
         # --- AÇÃO: Baixar Comprovantes (Só se status for de conclusão E conseguiu entrar nos detalhes) ---
         if any(s.lower() in status_portal_inicial.lower() for s in status_de_conclusao) and voltar_para_lista_necessario:
@@ -381,6 +399,8 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
                  resultado_final["status_robo"] = f"Finalizado: Nenhum Arquivo Baixado (Status Portal: {status_portal_inicial})"
             else:
                  resultado_final["status_robo"] = "Finalizado com Sucesso"
+            resultado_final["monitoramento_ativo"] = False
+            resultado_final["motivo_encerramento"] = f"Status portal final: {status_portal_inicial}"
 
             # <<< IMPORTANTE >>> O 'Voltar' agora será tratado no 'finally' geral
 
@@ -543,6 +563,26 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
                  resultado_final["status_robo"] = "Erro: Falha ao voltar para lista (Confirmação)"
                  voltar_para_lista_necessario = False # Não precisa voltar no final
 
+        # --- AÇÃO: Encerrar e alertar o usuário em status negativos do portal ---
+        elif any(s.lower() in status_portal_inicial.lower() for s in status_negativos) and voltar_para_lista_necessario:
+            logging.warning(f"Status negativo identificado no portal: '{status_portal_inicial}'. Encerrando monitoramento para ação do usuário.")
+            resultado_final["status_robo"] = f"Alerta: Ação do usuário necessária ({status_portal_inicial})"
+            resultado_final["monitoramento_ativo"] = False
+            resultado_final["motivo_encerramento"] = f"Status portal terminal negativo: {status_portal_inicial}"
+
+        # --- AÇÃO: Status do portal inválido ou mal preenchido ---
+        elif status_portal_invalido and voltar_para_lista_necessario:
+            logging.error(f"Status do portal inválido para ID {solicitacao_id}: '{status_portal_inicial}'. Nova tentativa necessária.")
+            resultado_final["status_robo"] = "Erro: Status do portal inválido ou não lido"
+            resultado_final["monitoramento_ativo"] = True
+            resultado_final["motivo_encerramento"] = None
+
+        # --- AÇÃO: Monitoramento do banco sem comprovante ainda ---
+        elif any(s.lower() in status_portal_inicial.lower() for s in status_de_monitoramento) and voltar_para_lista_necessario:
+            logging.info(f"Status '{status_portal_inicial}' indica que o banco ainda está processando a custa. Mantendo monitoramento.")
+            resultado_final["status_robo"] = "Monitorando retorno do banco"
+            resultado_final["monitoramento_ativo"] = True
+            resultado_final["motivo_encerramento"] = None
 
         # --- AÇÃO: Nenhuma Ação Específica (Apenas Monitoramento e Captura de Dados) ---
         elif voltar_para_lista_necessario: # Só executa se conseguiu entrar nos detalhes

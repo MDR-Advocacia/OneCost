@@ -5,7 +5,8 @@ import logging
 from typing import Dict, Any, Optional
 
 _ultimo_marcapasso = 0
-INTERVALO_MARCAPASSO = 20 * 60  # 20 minutos em segundos
+_setor_atual = None  # NOVO: Vai guardar o setor exato retornado pelo OneLog
+INTERVALO_MARCAPASSO = 15 * 60  # Reduzido para 15 min (O OneLog desativa aos 19/20)
 
 try:
     from config import ONELOG_API_URL, ONELOG_USERNAME, ONELOG_PASSWORD
@@ -17,11 +18,10 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
-# Definimos um User-Agent padrão (Windows) caso a API do OneLog não devolva um
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 def obter_sessao_onelog() -> Dict[str, Any]:
-    """Faz o fluxo completo de login no OneLog e retorna os cookies e User-Agent."""
+    global _setor_atual
     log.info("--- INICIANDO INTEGRAÇÃO COM ONELOG ---")
     if not ONELOG_USERNAME or not ONELOG_PASSWORD:
         raise ValueError("Credenciais do OneLog (ONELOG_USERNAME/ONELOG_PASSWORD) não configuradas no .env.")
@@ -33,7 +33,6 @@ def obter_sessao_onelog() -> Dict[str, Any]:
     }
 
     try:
-        # 1. Solicita Login
         log.info(f"Solicitando acesso ao Portal via OneLog ({ONELOG_API_URL})...")
         res_login = requests.post(f"{ONELOG_API_URL}/api/zerocore/login", json=payload_login, timeout=15)
         
@@ -43,13 +42,13 @@ def obter_sessao_onelog() -> Dict[str, Any]:
         
         data_login = res_login.json()
         setor = data_login.get("setor")
+        _setor_atual = setor # SALVA O NOME CORRETO (Ex: "ROBOS") PARA USAR NO MARCAPASSO
+        log.info(f"✅ Setor identificado pelo OneLog: {_setor_atual}")
         
-        # Se for sucesso instantâneo (sessão já existia)
         if data_login.get("status") == "sucesso":
             log.info("Sessão já estava ativa e pronta no OneLog!")
             return {"cookies": data_login.get("cookies", []), "user_agent": DEFAULT_USER_AGENT}
 
-        # 2. Polling (Aguardando o robô do OneLog fazer o login real)
         log.info("Login enfileirado no OneLog. Aguardando processamento...")
         tentativas = 0
         while tentativas < 150:  # Timeout de ~5 minutos
@@ -68,7 +67,6 @@ def obter_sessao_onelog() -> Dict[str, Any]:
             if data_status.get("concluido"):
                 log.info("OneLog finalizou o login! Resgatando cookies...")
                 
-                # 3. Pegar os cookies finais
                 payload_sessao = {"username": ONELOG_USERNAME, "password": ONELOG_PASSWORD, "setor": setor}
                 res_sessao = requests.post(f"{ONELOG_API_URL}/api/zerocore/session", json=payload_sessao, timeout=15)
                 res_sessao.raise_for_status()
@@ -78,7 +76,6 @@ def obter_sessao_onelog() -> Dict[str, Any]:
                     log.info("Cookies resgatados com sucesso do OneLog.")
                     return {
                         "cookies": session_data.get("cookies", []),
-                        # Pega o User-Agent que o OneLog usou (se ele devolver), senão usa o padrão
                         "user_agent": session_data.get("user_agent", DEFAULT_USER_AGENT) 
                     }
                 else:
@@ -92,22 +89,31 @@ def obter_sessao_onelog() -> Dict[str, Any]:
 
 
 def renovar_sessao_onelog() -> bool:
-    """Aciona a rota de heartbeat/renew do OneLog (Marcapasso) a cada 20 minutos."""
-    global _ultimo_marcapasso
+    global _ultimo_marcapasso, _setor_atual
     agora = time.time()
     
-    # Se passaram menos de 20 minutos desde a última vez, o robô ignora o envio e segue a vida
     if agora - _ultimo_marcapasso < INTERVALO_MARCAPASSO:
         return True
 
+    if not _setor_atual:
+        log.warning("Marcapasso ignorado: O robô ainda não fez login para descobrir o setor.")
+        return False
+
     try:
-        log.info("O tempo passou! Enviando sinal de marcapasso (renew) para o OneLog...")
-        # Lembre-se de manter a alteração do payload ou do ?setor=BB_Robos que resolveu o erro 400
-        res = requests.post(f"{ONELOG_API_URL}/api/zerocore/renew?setor=BB_Robos", timeout=10)
+        log.info(f"Enviando marcapasso para o OneLog no setor: '{_setor_atual}'...")
+        
+        # Envia no JSON para bater certinho com o novo api.py do OneLog
+        payload_renew = {
+            "username": ONELOG_USERNAME,
+            "password": ONELOG_PASSWORD,
+            "setor": _setor_atual,
+            "user_agent": DEFAULT_USER_AGENT
+        }
+        
+        res = requests.post(f"{ONELOG_API_URL}/api/zerocore/renew", json=payload_renew, timeout=10)
         res.raise_for_status()
         log.info("Marcapasso recebido com sucesso pelo OneLog.")
         
-        # Só atualiza o relógio se o OneLog confirmar o recebimento
         _ultimo_marcapasso = agora
         return True
     except Exception as e:

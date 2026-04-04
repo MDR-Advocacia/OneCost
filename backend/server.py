@@ -20,6 +20,7 @@ import schemas
 from bd import models
 from bd.database import SessionLocal, engine
 from auth import verify_password, create_access_token, get_password_hash
+from ad_integration import autenticar_e_obter_setor, listar_ous_bb_ad
 from config import ACCESS_TOKEN_EXPIRE_MINUTES, SECRET_KEY, ALGORITHM
 
 from jose import JWTError, jwt
@@ -38,7 +39,7 @@ Instrumentator().instrument(app).expose(app)
 
 
 # --- Configuração do CORS ---
-cors_regex = r"http://(localhost|127\.0\.0\.1|192\.168\.50\.\d{1,3}|192\.168\.0\.\d{1,3}):3001|http://onecost\.mdr\.local(:\d+)?"
+cors_regex = r"http://(localhost|127\.0\.0\.1|192\.168\.50\.\d{1,3}|192\.168\.0\.\d{1,3}):3001|https?://onecost\.mdr\.local(:\d+)?|https://onecost\.mdradvocacia\.com"
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=cors_regex,  # Usa regex
@@ -70,9 +71,49 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 class TokenData(BaseModel):
     username: Optional[str] = None
 
+
+def random_unusable_password(username: str) -> str:
+    return get_password_hash(f"ad-user::{username}::disabled-local-login")
+
 # --- Funções de Autenticação e Permissão ---
 def get_user(db: Session, username: str) -> Optional[models.User]:
     return db.query(models.User).filter(models.User.username == username).first()
+
+
+def sync_ad_user(db: Session, username: str, setor: str) -> models.User:
+    user = get_user(db, username=username)
+
+    if user:
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Usuario inativo. Procure um administrador.",
+            )
+
+        changed = False
+        if user.setor != setor:
+            user.setor = setor
+            changed = True
+        if user.auth_provider != "ad":
+            user.auth_provider = "ad"
+            changed = True
+        if changed:
+            db.commit()
+            db.refresh(user)
+        return user
+
+    user = models.User(
+        username=username,
+        hashed_password=random_unusable_password(username),
+        role="user",
+        is_active=True,
+        setor=setor,
+        auth_provider="ad",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.User:
     credentials_exception = HTTPException(
@@ -111,16 +152,32 @@ async def require_admin_role(current_user: models.User = Depends(get_current_act
 @app.post("/login", response_model=schemas.Token)
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     log.info(f"[/login] Tentativa de login para usuário: '{form_data.username}'")
-    user = get_user(db, username=form_data.username)
-    password_verified = user and verify_password(form_data.password, user.hashed_password)
-    if not user or not user.is_active or not password_verified:
-        log.warning(f"[/login] Falha na autenticação para '{form_data.username}'.")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Usuário ou senha incorretos ou usuário inativo",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    log.info(f"[/login] Autenticação OK para '{form_data.username}'. Gerando token...")
+    user = None
+    local_user = get_user(db, username=form_data.username)
+    password_verified = local_user and verify_password(form_data.password, local_user.hashed_password)
+
+    # Contas administrativas locais não devem depender do AD para autenticar.
+    if local_user and password_verified and local_user.is_active:
+        if local_user.role == "admin":
+            user = local_user
+            log.info(f"[/login] Login local prioritario aceito para '{form_data.username}'.")
+
+    if not user:
+        ad_result = autenticar_e_obter_setor(form_data.username, form_data.password)
+        if ad_result.get("status") == "sucesso":
+            user = sync_ad_user(db, form_data.username, ad_result["setor"])
+            log.info(f"[/login] Login AD aceito para '{form_data.username}' no setor '{user.setor}'.")
+        elif local_user and password_verified and local_user.is_active:
+            user = local_user
+            log.info(f"[/login] Login local de fallback aceito para '{form_data.username}'.")
+        else:
+            log.warning(f"[/login] Falha na autenticação para '{form_data.username}'.")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=ad_result.get("mensagem") or "Usuário ou senha incorretos ou usuário inativo",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(data={"sub": user.username}, expires_delta=access_token_expires)
     return {"access_token": access_token, "token_type": "bearer"}
@@ -132,6 +189,22 @@ async def read_users_me(current_user: models.User = Depends(get_current_active_u
     """Retorna os dados do usuário logado e ativo."""
     return current_user
 
+
+@app.get("/sectors/me")
+def read_my_sector(current_user: models.User = Depends(get_current_active_user)):
+    return {
+        "username": current_user.username,
+        "setor": current_user.setor,
+        "role": current_user.role,
+        "auth_provider": current_user.auth_provider,
+    }
+
+
+@app.get("/sectors/", dependencies=[Depends(require_admin_role)])
+def read_ad_sectors(current_user: models.User = Depends(require_admin_role)):
+    setores = listar_ous_bb_ad()
+    return {"setores": setores}
+
 @app.post("/users/", response_model=schemas.User, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin_role)])
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db), current_admin: models.User = Depends(require_admin_role)):
     """Cria um novo usuário (apenas admin)."""
@@ -140,7 +213,14 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db), current
     if db_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nome de usuário já registrado")
     hashed_password = get_password_hash(user.password)
-    new_user = models.User(username=user.username, hashed_password=hashed_password, role=user.role, is_active=True)
+    new_user = models.User(
+        username=user.username,
+        hashed_password=hashed_password,
+        role=user.role,
+        is_active=True,
+        setor=user.setor,
+        auth_provider='local'
+    )
     try:
         db.add(new_user)
         db.commit()
@@ -232,6 +312,11 @@ def update_user(user_id: int, user_update: schemas.UserUpdate, db: Session = Dep
             updated = True
             log.info(f"Role do usuário ID {user_id} atualizada para '{new_role}'.")
 
+        if 'setor' in update_data and update_data['setor'] != db_user.setor:
+            db_user.setor = update_data['setor']
+            updated = True
+            log.info(f"Setor do usuário ID {user_id} atualizado para '{update_data['setor']}'.")
+
         if updated:
             db.commit()
             db.refresh(db_user)
@@ -263,9 +348,14 @@ def create_solicitacao(
             npj=solicitacao.npj,
             numero_processo=solicitacao.numero_processo,
             numero_solicitacao=solicitacao.numero_solicitacao,
+            especificacao=solicitacao.especificacao,
+            status_portal=solicitacao.status_portal,
+            prazo_fatal_em=solicitacao.prazo_fatal_em,
+            monitoramento_ativo=solicitacao.monitoramento_ativo,
             valor=solicitacao.valor, # Já validado pelo schema
             data_solicitacao=solicitacao.data_solicitacao,
             aguardando_confirmacao=solicitacao.aguardando_confirmacao,
+            setor_criacao=current_user.setor,
             usuario_criacao_id=current_user.id,
             status_robo="Pendente",
             is_archived=False
@@ -294,13 +384,14 @@ async def read_solicitacoes(
     status_robo: Optional[str] = Query(None),
     status_robo_ne: Optional[str] = Query(None), # Para excluir status
     include_archived: bool = Query(False),
+    scope: Optional[str] = Query(None, description="Escopo: me, sector ou all"),
     # NOVO: Filtro por usuário criador
     usuario_id: Optional[int] = Query(None, description="Filtrar por ID do usuário criador"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user)
 ):
     """Lista solicitações com filtros opcionais."""
-    log.info(f"[GET /solicitacoes/] Buscando: skip={skip}, limit={limit}, status_robo={status_robo}, status_robo_ne={status_robo_ne}, archived={include_archived}, usuario_id={usuario_id} por '{current_user.username}'")
+    log.info(f"[GET /solicitacoes/] Buscando: skip={skip}, limit={limit}, status_robo={status_robo}, status_robo_ne={status_robo_ne}, archived={include_archived}, usuario_id={usuario_id}, scope={scope} por '{current_user.username}'")
 
     # Regra de permissão para ver arquivadas
     if include_archived and current_user.role != 'admin':
@@ -330,7 +421,42 @@ async def read_solicitacoes(
         if not include_archived:
             query = query.filter(models.SolicitacaoCusta.is_archived == False)
 
-        # NOVO: Filtro por usuário
+        normalized_scope = (scope or '').strip().lower()
+
+        # Filtro por escopo do usuário
+        if current_user.role != 'admin':
+            if normalized_scope in ('', 'me'):
+                query = query.filter(models.SolicitacaoCusta.usuario_criacao_id == current_user.id)
+            elif normalized_scope == 'sector':
+                if not current_user.setor:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Usuário sem setor vinculado.")
+                query = query.filter(
+                    (models.SolicitacaoCusta.setor_criacao == current_user.setor) |
+                    (
+                        (models.SolicitacaoCusta.setor_criacao.is_(None)) &
+                        models.SolicitacaoCusta.usuario_criacao.has(models.User.setor == current_user.setor)
+                    )
+                )
+            elif normalized_scope == 'all':
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuários comuns não podem visualizar todas as solicitações.")
+            else:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Escopo inválido. Use 'me' ou 'sector'.")
+        elif normalized_scope == 'me':
+            query = query.filter(models.SolicitacaoCusta.usuario_criacao_id == current_user.id)
+        elif normalized_scope == 'sector':
+            if not current_user.setor:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Admin sem setor vinculado.")
+            query = query.filter(
+                (models.SolicitacaoCusta.setor_criacao == current_user.setor) |
+                (
+                    (models.SolicitacaoCusta.setor_criacao.is_(None)) &
+                    models.SolicitacaoCusta.usuario_criacao.has(models.User.setor == current_user.setor)
+                )
+            )
+        elif normalized_scope not in ('', 'all'):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Escopo inválido. Use 'me', 'sector' ou 'all'.")
+
+        # NOVO: Filtro por usuário explícito
         if usuario_id is not None:
             # Verifica se o usuário tentando filtrar por outro ID é admin
             if usuario_id != current_user.id and current_user.role != 'admin':
@@ -341,6 +467,8 @@ async def read_solicitacoes(
         solicitacoes = query.order_by(models.SolicitacaoCusta.id.desc()).offset(skip).limit(limit).all()
         log.info(f"[GET /solicitacoes/] Encontradas {len(solicitacoes)} solicitações após filtros.")
         return solicitacoes
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"[GET /solicitacoes/] Erro interno ao buscar solicitações: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro interno ao buscar solicitações.")
@@ -368,6 +496,9 @@ def update_solicitacao(
     # Impede finalizar se já estiver arquivada
     if db_solicitacao.is_archived and solicitacao_update.finalizar:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Não é possível finalizar uma solicitação arquivada.")
+
+    if current_user.role != 'admin' and db_solicitacao.usuario_criacao_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para alterar esta solicitação.")
 
     # Pega os dados enviados, excluindo as flags 'finalizar' e 'arquivar' que são tratadas separadamente
     update_data = solicitacao_update.model_dump(exclude_unset=True, exclude={'finalizar', 'arquivar'})

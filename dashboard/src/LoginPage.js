@@ -20,7 +20,7 @@ function LoginPage({ onLoginSuccess }) {
             console.log('[LoginPage] API de login retornou SUCESSO. Dados recebidos:', data);
             onLoginSuccess(data);
         } catch (err) {
-            const errorMessage = err.message || 'Falha no login. Verifique suas credenciais.';
+            const errorMessage = err.response?.data?.detail || err.message || 'Falha no login. Verifique suas credenciais.';
             console.error('[LoginPage] API de login retornou ERRO:', errorMessage);
             setError(errorMessage);
         }

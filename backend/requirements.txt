@@ -8,3 +8,5 @@ passlib==1.7.4
 bcrypt==3.2.0
 alembic
 starlette-prometheus==0.10.0
+prometheus-fastapi-instrumentator==7.0.0
+ldap3==2.9.1

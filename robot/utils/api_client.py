@@ -235,7 +235,11 @@ def update_solicitacao_na_api(solicitacao_id: int, payload_original: Dict[str, A
         "numero_processo", # Agora vem do resultado_final["numero_processo"]
         "especificacao",   # Agora vem do resultado_final["especificacao"]
         "comprovantes_path", # Agora vem do resultado_final["comprovantes_path"]
-        "usuario_confirmacao_id" # Vem do resultado_final["usuario_confirmacao_id"]
+        "usuario_confirmacao_id", # Vem do resultado_final["usuario_confirmacao_id"]
+        "monitoramento_ativo",
+        "motivo_encerramento",
+        "proxima_verificacao_em",
+        "alerta_enviado_em"
     ]
 
     for key in campos_obrigatorios_robo:
@@ -271,7 +275,17 @@ def update_solicitacao_na_api(solicitacao_id: int, payload_original: Dict[str, A
     # (status_portal, numero_processo, especificacao, comprovantes_path, usuario_confirmacao_id, valor)
     # O status_robo NUNCA deve ser None ao atualizar.
     payload_limpo_final = {}
-    campos_permitidos_none_na_api = {'status_portal', 'numero_processo', 'especificacao', 'comprovantes_path', 'usuario_confirmacao_id', 'valor'}
+    campos_permitidos_none_na_api = {
+        'status_portal',
+        'numero_processo',
+        'especificacao',
+        'comprovantes_path',
+        'usuario_confirmacao_id',
+        'valor',
+        'motivo_encerramento',
+        'proxima_verificacao_em',
+        'alerta_enviado_em'
+    }
 
     for k, v in payload_final_json.items():
         if v is not None:

@@ -37,7 +37,8 @@ api.interceptors.response.use(
   },
   (error) => {
     console.error("[api.js] Erro na resposta da API:", error.response?.status, error.response?.data || error.message);
-    if (error.response && error.response.status === 401) {
+    const isLoginRequest = String(error.config?.url || '').endsWith('/login');
+    if (error.response && error.response.status === 401 && !isLoginRequest) {
       console.warn("[api.js] Recebido erro 401. Removendo token e recarregando.");
       localStorage.removeItem('token');
       // Tenta redirecionar para a raiz (que deve ser o login)
@@ -83,8 +84,8 @@ export const getCurrentUser = async () => {
 // --- FUNÇÕES DE SOLICITAÇÕES DE CUSTAS ---
 
 // MODIFICADO: Aceita userId opcional
-export const getSolicitacoes = async (includeArchived = false, userId = null) => {
-    console.log(`[api.js] Buscando /solicitacoes... includeArchived=${includeArchived}, userId=${userId}`);
+export const getSolicitacoes = async (includeArchived = false, userId = null, scope = null) => {
+    console.log(`[api.js] Buscando /solicitacoes... includeArchived=${includeArchived}, userId=${userId}, scope=${scope}`);
     const params = {
         include_archived: includeArchived,
         limit: 500 // Mantém limite alto por enquanto
@@ -92,6 +93,9 @@ export const getSolicitacoes = async (includeArchived = false, userId = null) =>
     // Adiciona o filtro de usuário se fornecido
     if (userId !== null && userId !== undefined) {
         params.usuario_id = userId; // Nome do parâmetro no backend
+    }
+    if (scope) {
+        params.scope = scope;
     }
     const response = await api.get('/solicitacoes/', { params });
     console.log(`[api.js] Recebidas ${response.data.length} solicitações.`);

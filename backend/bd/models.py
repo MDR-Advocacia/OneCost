@@ -11,6 +11,8 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     role = Column(String, default='user', nullable=False) # 'admin' ou 'user'
     is_active = Column(Boolean, default=True, nullable=False)
+    setor = Column(String, nullable=True, index=True)
+    auth_provider = Column(String, default='local', nullable=False)
 
     # Relacionamentos
     solicitacoes_criadas = relationship("SolicitacaoCusta", back_populates="usuario_criacao", foreign_keys="[SolicitacaoCusta.usuario_criacao_id]")
@@ -29,6 +31,7 @@ class SolicitacaoCusta(Base):
     valor = Column(Numeric(10, 2), nullable=False)
     data_solicitacao = Column(Date, nullable=False)
     aguardando_confirmacao = Column(Boolean, default=True) # Se usuário marcou
+    setor_criacao = Column(String, nullable=True, index=True)
 
     # --- CAMPO ESPECIFICAÇÃO ADICIONADO ---
     especificacao = Column(String, nullable=True) # Ex: "Custas iniciais"
@@ -37,6 +40,12 @@ class SolicitacaoCusta(Base):
     status_portal = Column(String, nullable=True)
     status_robo = Column(String, default="Pendente", nullable=False)
     ultima_verificacao_robo = Column(DateTime, nullable=True)
+    prazo_fatal_em = Column(DateTime(timezone=True), nullable=True, index=True)
+    proxima_verificacao_em = Column(DateTime(timezone=True), nullable=True, index=True)
+    alerta_enviado_em = Column(DateTime(timezone=True), nullable=True)
+    acao_apos_alerta = Column(String, nullable=True)
+    monitoramento_ativo = Column(Boolean, default=True, nullable=False)
+    motivo_encerramento = Column(String, nullable=True)
     comprovantes_path = Column(JSON, nullable=True) # Lista de caminhos relativos
 
     # --- CAMPOS DE RASTREABILIDADE ---
