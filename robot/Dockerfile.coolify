@@ -1,0 +1,19 @@
+FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y xvfb --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.coolify.txt /app/requirements.coolify.txt
+RUN pip install --no-cache-dir -r /app/requirements.coolify.txt
+
+RUN mkdir -p /app/robot
+COPY . /app/robot
+
+RUN test -f /app/robot/main.py
+
+ENV APP_DIR=/app
+ENV PYTHONPATH=/app/robot
+ENV PYTHONUNBUFFERED=1
+
+CMD ["sh", "-lc", "xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' python /app/robot/main.py"]

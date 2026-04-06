@@ -23,8 +23,8 @@ services:
 
   backend:
     build:
-      context: .
-      dockerfile: backend/Dockerfile.prod
+      context: ./backend
+      dockerfile: Dockerfile.coolify
     restart: unless-stopped
     environment:
       APP_DIR: /app
@@ -79,8 +79,8 @@ services:
 
   robot:
     build:
-      context: .
-      dockerfile: dockerfile.robot.prod
+      context: ./robot
+      dockerfile: Dockerfile.coolify
     restart: unless-stopped
     shm_size: 1gb
     environment:
