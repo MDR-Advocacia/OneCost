@@ -7,6 +7,7 @@ from typing import List, Optional
 from decimal import Decimal, InvalidOperation
 import json
 import logging
+import os
 from pathlib import Path
 import re  # Importar re para regex no CORS
 
@@ -51,7 +52,7 @@ log.info(f"CORS configurado para permitir regex: {cors_regex}")
 
 # --- Servir Arquivos Estáticos ---
 try:
-    static_directory = Path("/app/static/comprovantes")
+    static_directory = Path(os.getenv("COMPROVANTES_STATIC_DIR", "/app/static/comprovantes"))
     static_directory.mkdir(parents=True, exist_ok=True)
     app.mount("/static/comprovantes", StaticFiles(directory=static_directory), name="static_comprovantes")
     log.info(f"Servindo arquivos estáticos de '{static_directory}' em '/static/comprovantes'")

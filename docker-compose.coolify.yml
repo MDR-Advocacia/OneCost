@@ -24,9 +24,11 @@ services:
   backend:
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: backend/Dockerfile.prod
     restart: unless-stopped
     environment:
+      APP_DIR: /srv/backend
+      COMPROVANTES_STATIC_DIR: /srv/backend/static/comprovantes
       DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-onecost}
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
@@ -49,7 +51,7 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - comprovantes_data:/app/static/comprovantes
+      - comprovantes_data:/srv/backend/static/comprovantes
     deploy:
       resources:
         limits:
@@ -78,10 +80,11 @@ services:
   robot:
     build:
       context: .
-      dockerfile: dockerfile.robot
+      dockerfile: dockerfile.robot.prod
     restart: unless-stopped
     shm_size: 1gb
     environment:
+      APP_DIR: /srv/onecost
       API_BASE_URL: ${API_BASE_URL:-http://backend:8000}
       ROBOT_USERNAME: ${ROBOT_USERNAME:-robot}
       ROBOT_PASSWORD: ${ROBOT_PASSWORD}
@@ -92,7 +95,7 @@ services:
     depends_on:
       - backend
     volumes:
-      - comprovantes_data:/app/comprovantes
+      - comprovantes_data:/srv/onecost/comprovantes
     deploy:
       resources:
         limits:

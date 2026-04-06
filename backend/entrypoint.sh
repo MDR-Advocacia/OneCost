@@ -1,5 +1,6 @@
 #!/bin/sh
 
+APP_DIR="${APP_DIR:-/app}"
 POSTGRES_HOST="${POSTGRES_HOST:-db}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_USER="${POSTGRES_USER:-admin}"
@@ -33,7 +34,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
-dotenv_path = '/app/.env'
+app_dir = os.getenv('APP_DIR', '/app')
+dotenv_path = os.path.join(app_dir, '.env')
 print(f"[Entrypoint-PY] Tentando carregar .env de: {dotenv_path}")
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path=dotenv_path, verbose=True)
@@ -41,8 +43,8 @@ if os.path.exists(dotenv_path):
 else:
     print(f"[Entrypoint-PY] ATENÇÃO: Arquivo .env não encontrado em {dotenv_path}.")
 
-# Adiciona /app ao sys.path para encontrar os módulos
-sys.path.insert(0, '/app')
+# Adiciona o diretório da aplicação ao sys.path para encontrar os módulos
+sys.path.insert(0, app_dir)
 try:
     from bd.database import engine, SessionLocal
     from bd.models import Base, User
@@ -52,10 +54,10 @@ try:
 except ImportError as e:
     print(f"[Entrypoint-PY] ERRO CRÍTICO ao importar módulos: {e}")
     # Lista o conteúdo para ajudar no debug
-    print("[Entrypoint-PY] Conteúdo de /app:")
-    os.system('ls -la /app')
-    print("[Entrypoint-PY] Conteúdo de /app/bd:")
-    os.system('ls -la /app/bd')
+    print(f"[Entrypoint-PY] Conteúdo de {app_dir}:")
+    os.system(f'ls -la {app_dir}')
+    print(f"[Entrypoint-PY] Conteúdo de {app_dir}/bd:")
+    os.system(f'ls -la {app_dir}/bd')
     sys.exit(1)
 
 # Aplica migrações (cria tabelas)
