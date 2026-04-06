@@ -16,7 +16,7 @@ sys.path.insert(0, APP_DIR)
 
 from bd.database import engine, SessionLocal  # noqa: E402
 from bd.models import Base, User  # noqa: E402
-from auth import get_password_hash  # noqa: E402
+from auth import get_password_hash, verify_password  # noqa: E402
 from config import ADMIN_USERNAME, ADMIN_PASSWORD  # noqa: E402
 
 
@@ -52,7 +52,7 @@ def run_light_migrations() -> None:
     print("[bootstrap] Migrações leves aplicadas.")
 
 
-def ensure_user(db, username: str, password: str, role: str = "admin") -> None:
+def ensure_user(db, username: str, password: str, role: str = "admin", sync_password: bool = False) -> None:
     user = db.query(User).filter(User.username == username).first()
     if not user:
         user = User(
@@ -73,6 +73,9 @@ def ensure_user(db, username: str, password: str, role: str = "admin") -> None:
     if not user.is_active:
         user.is_active = True
         changed = True
+    if sync_password and password and not verify_password(password, user.hashed_password):
+        user.hashed_password = get_password_hash(password)
+        changed = True
     if changed:
         db.commit()
         print(f"[bootstrap] Usuario '{username}' atualizado com role '{role}' e ativo.")
@@ -86,11 +89,17 @@ def main() -> int:
 
     db = SessionLocal()
     try:
-        ensure_user(db, ADMIN_USERNAME, ADMIN_PASSWORD, "admin")
+        ensure_user(
+            db,
+            ADMIN_USERNAME,
+            ADMIN_PASSWORD,
+            "admin",
+            sync_password=bool(os.getenv("ADMIN_PASSWORD")),
+        )
         robot_username = os.getenv("ROBOT_USERNAME", "robot")
         robot_password = os.getenv("ROBOT_PASSWORD")
         if robot_password:
-            ensure_user(db, robot_username, robot_password, "admin")
+            ensure_user(db, robot_username, robot_password, "admin", sync_password=True)
         else:
             print("[bootstrap] ROBOT_PASSWORD ausente; usuario do robo nao foi ajustado.")
         return 0
