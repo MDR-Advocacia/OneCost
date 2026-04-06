@@ -381,7 +381,8 @@ def create_solicitacao(
 
 @app.get("/solicitacoes/", response_model=List[schemas.SolicitacaoCusta])
 async def read_solicitacoes(
-    skip: int = 0, limit: int = 100,
+    skip: int = 0,
+    limit: Optional[int] = Query(None, ge=1),
     status_robo: Optional[str] = Query(None),
     status_robo_ne: Optional[str] = Query(None), # Para excluir status
     include_archived: bool = Query(False),
@@ -464,8 +465,12 @@ async def read_solicitacoes(
                  raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas admins podem filtrar por outros usuários.")
             query = query.filter(models.SolicitacaoCusta.usuario_criacao_id == usuario_id)
 
-        # Ordenação e paginação
-        solicitacoes = query.order_by(models.SolicitacaoCusta.id.desc()).offset(skip).limit(limit).all()
+        # Ordenação e paginação opcional
+        query = query.order_by(models.SolicitacaoCusta.id.desc()).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+
+        solicitacoes = query.all()
         log.info(f"[GET /solicitacoes/] Encontradas {len(solicitacoes)} solicitações após filtros.")
         return solicitacoes
     except HTTPException:

@@ -97,8 +97,7 @@ export const getCurrentUser = async () => {
 export const getSolicitacoes = async (includeArchived = false, userId = null, scope = null) => {
     console.log(`[api.js] Buscando /solicitacoes... includeArchived=${includeArchived}, userId=${userId}, scope=${scope}`);
     const params = {
-        include_archived: includeArchived,
-        limit: 500 // Mantém limite alto por enquanto
+        include_archived: includeArchived
     };
     // Adiciona o filtro de usuário se fornecido
     if (userId !== null && userId !== undefined) {

@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 // Importa TODAS as funções da API, incluindo as novas e a URL
 import {
     API_URL,
-    login,
     getCurrentUser,
     getSolicitacoes,
     createSolicitacao,
@@ -120,14 +119,71 @@ const normalizeDateString = (rawValue) => {
     return '';
 };
 
-const toFortalezaIsoString = (dateTimeLocal) => {
-    if (!dateTimeLocal) return null;
+const toFortalezaIsoString = (dateOrDateTimeValue) => {
+    if (!dateOrDateTimeValue) return null;
 
-    const match = String(dateTimeLocal).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
-    if (!match) return null;
+    const dateOnlyMatch = String(dateOrDateTimeValue).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnlyMatch) {
+        const [, year, month, day] = dateOnlyMatch;
+        return `${year}-${month}-${day}T15:00:00-03:00`;
+    }
 
-    const [, year, month, day, hour, minute] = match;
+    const dateTimeMatch = String(dateOrDateTimeValue).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+    if (!dateTimeMatch) return null;
+
+    const [, year, month, day, hour, minute] = dateTimeMatch;
     return `${year}-${month}-${day}T${hour}:${minute}:00-03:00`;
+};
+
+const EMPTY_SECTOR_FILTER = '__sem_setor__';
+const EMPTY_BANK_STATUS_FILTER = '__sem_status_banco__';
+
+const getSolicitacaoSectorValue = (solicitacao) => {
+    const rawValue = solicitacao?.setor_criacao || solicitacao?.usuario_criacao?.setor || '';
+    return String(rawValue).trim();
+};
+
+const getStatusBancoFilterValue = (statusPortal) => {
+    const normalizedStatus = String(statusPortal || '').trim();
+    return normalizedStatus || EMPTY_BANK_STATUS_FILTER;
+};
+
+const getStatusBancoFilterLabel = (statusPortal) => {
+    const normalizedStatus = String(statusPortal || '').trim();
+    return normalizedStatus || 'Sem retorno do banco';
+};
+
+const buildPaginationItems = (currentPage, totalPages) => {
+    if (totalPages <= 1) return [];
+
+    const pages = new Set([
+        1, 2, 3,
+        currentPage - 1, currentPage, currentPage + 1,
+        totalPages - 2, totalPages - 1, totalPages
+    ]);
+
+    const sortedPages = Array.from(pages)
+        .filter((page) => page >= 1 && page <= totalPages)
+        .sort((a, b) => a - b);
+
+    const items = [];
+
+    sortedPages.forEach((page, index) => {
+        const previousPage = sortedPages[index - 1];
+
+        if (index > 0) {
+            const gap = page - previousPage;
+            if (gap === 2) {
+                items.push(previousPage + 1);
+            } else if (gap > 2) {
+                items.push(`ellipsis-${previousPage}-${page}`);
+            }
+        }
+
+        items.push(page);
+    });
+
+    return items;
 };
 
 const buildStaticDownloadUrl = (relativePath) => {
@@ -426,12 +482,12 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
                     <label htmlFor="prazoFatal">Prazo fatal para comprovante</label>
                     <input
                         id="prazoFatal"
-                        type="datetime-local"
+                        type="date"
                         value={prazoFatal}
                         onChange={(e) => setPrazoFatal(e.target.value)}
                         className="date-input-style"
                     />
-                    <small className="form-hint">Comparacao feita no fuso GMT-3 (America/Fortaleza). Ex.: 01/02 as 15:00.</small>
+                    <small className="form-hint">Horário fixo de comparação: 15:00 do PF no fuso GMT-3 (America/Fortaleza).</small>
                 </div>
             </div>
             <div className="submit-row">
@@ -920,17 +976,47 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
     const [filterProcesso, setFilterProcesso] = useState('');
     const [filterStartDate, setFilterStartDate] = useState('');
     const [filterEndDate, setFilterEndDate] = useState('');
+    const [filterStatusBanco, setFilterStatusBanco] = useState('all');
 
     // --- Estados para Paginação ---
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(10);
-    const [pageInput, setPageInput] = useState('1');
+
+    const availableStatusBanco = useMemo(() => {
+        const uniqueStatuses = new Set();
+
+        allSolicitacoes.forEach((item) => {
+            uniqueStatuses.add(getStatusBancoFilterValue(item.status_portal));
+        });
+
+        return Array.from(uniqueStatuses)
+            .sort((left, right) => {
+                if (left === EMPTY_BANK_STATUS_FILTER) return -1;
+                if (right === EMPTY_BANK_STATUS_FILTER) return 1;
+                return left.localeCompare(right, 'pt-BR');
+            })
+            .map((statusValue) => ({
+                value: statusValue,
+                label: getStatusBancoFilterLabel(statusValue === EMPTY_BANK_STATUS_FILTER ? '' : statusValue)
+            }));
+    }, [allSolicitacoes]);
 
     // --- Filtragem ---
     const filteredSolicitacoes = useMemo(() => {
         return allSolicitacoes.filter(item => {
             const npjMatch = filterNpj ? item.npj?.toLowerCase().includes(filterNpj.toLowerCase()) : true;
             const processoMatch = filterProcesso ? item.numero_processo?.toLowerCase().includes(filterProcesso.toLowerCase()) : true;
+            const statusBancoValue = getStatusBancoFilterValue(item.status_portal);
+            const statusBancoMatch = filterStatusBanco === 'all' ? true : statusBancoValue === filterStatusBanco;
+
+            let sectorMatch = true;
+            if (isAdmin && currentFilters.userFilter === 'sector') {
+                const selectedSector = currentFilters.selectedSector || '';
+                const itemSectorValue = getSolicitacaoSectorValue(item);
+                sectorMatch = selectedSector
+                    ? (selectedSector === EMPTY_SECTOR_FILTER ? !itemSectorValue : itemSectorValue === selectedSector)
+                    : true;
+            }
 
             let dateMatch = true;
             if (filterStartDate || filterEndDate) {
@@ -959,20 +1045,20 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                 }
             }
 
-            return npjMatch && processoMatch && dateMatch;
+            return npjMatch && processoMatch && statusBancoMatch && sectorMatch && dateMatch;
         });
-    }, [allSolicitacoes, filterNpj, filterProcesso, filterStartDate, filterEndDate]);
+    }, [allSolicitacoes, currentFilters.selectedSector, currentFilters.userFilter, filterEndDate, filterNpj, filterProcesso, filterStartDate, filterStatusBanco, isAdmin]);
 
      // --- Paginação ---
+    const totalPages = Math.max(1, Math.ceil(filteredSolicitacoes.length / itemsPerPage));
     const indexOfLastItem = currentPage * itemsPerPage;
     const indexOfFirstItem = indexOfLastItem - itemsPerPage;
     const currentSolicitacoes = filteredSolicitacoes.slice(indexOfFirstItem, indexOfLastItem);
-    const totalPages = Math.ceil(filteredSolicitacoes.length / itemsPerPage);
+    const paginationItems = buildPaginationItems(currentPage, totalPages);
 
     const paginate = (pageNumber) => {
         if (pageNumber >= 1 && pageNumber <= totalPages) {
             setCurrentPage(pageNumber);
-            setPageInput(String(pageNumber));
         }
     };
 
@@ -982,27 +1068,12 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
         const nextItemsPerPage = parseInt(event.target.value, 10);
         setItemsPerPage(nextItemsPerPage);
         setCurrentPage(1);
-        setPageInput('1');
-    };
-    const handlePageInputSubmit = (event) => {
-        event.preventDefault();
-        const requestedPage = parseInt(pageInput, 10);
-        if (Number.isNaN(requestedPage)) {
-            setPageInput(String(currentPage));
-            return;
-        }
-        paginate(requestedPage);
     };
 
     // Reset page number when filters change externally (via props) or internally
     useEffect(() => {
         setCurrentPage(1);
-        setPageInput('1');
-    }, [filterNpj, filterProcesso, filterStartDate, filterEndDate, currentFilters, itemsPerPage]);
-
-    useEffect(() => {
-        setPageInput(String(currentPage));
-    }, [currentPage]);
+    }, [currentFilters, filterEndDate, filterNpj, filterProcesso, filterStartDate, filterStatusBanco, itemsPerPage]);
 
 
     // Fechar Menu Dropdown ao clicar fora
@@ -1196,6 +1267,21 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                     <label htmlFor="filterEndDate">Data Fim</label>
                     <input id="filterEndDate" type="date" value={filterEndDate} onChange={(e) => setFilterEndDate(e.target.value)} className="date-input-style"/>
                 </div>
+                <div className="form-group">
+                    <label htmlFor="filterStatusBanco">Status do Banco</label>
+                    <select
+                        id="filterStatusBanco"
+                        value={filterStatusBanco}
+                        onChange={(e) => setFilterStatusBanco(e.target.value)}
+                    >
+                        <option value="all">Todos</option>
+                        {availableStatusBanco.map((statusOption) => (
+                            <option key={statusOption.value} value={statusOption.value}>
+                                {statusOption.label}
+                            </option>
+                        ))}
+                    </select>
+                </div>
             </div>
 
              <div className="table-wrapper">
@@ -1291,7 +1377,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
              </p>
 
              {/* Paginação */}
-             {totalPages > 1 && (
+             {filteredSolicitacoes.length > 0 && (
                 <div className="pagination-controls">
                     <div className="pagination-config">
                         <label htmlFor="itemsPerPage" className="pagination-label">Itens por página</label>
@@ -1305,23 +1391,29 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                             <option value={25}>25</option>
                             <option value={50}>50</option>
                             <option value={100}>100</option>
+                            <option value={250}>250</option>
                         </select>
                     </div>
                     <button onClick={handlePrevPage} disabled={currentPage === 1} className="pagination-button">Anterior</button>
                     <span className="pagination-info">Página {currentPage} de {totalPages} ({filteredSolicitacoes.length} itens)</span>
-                    <form onSubmit={handlePageInputSubmit} className="pagination-jump-form">
-                        <label htmlFor="pageInput" className="pagination-label">Ir para</label>
-                        <input
-                            id="pageInput"
-                            type="number"
-                            min={1}
-                            max={totalPages}
-                            value={pageInput}
-                            onChange={(event) => setPageInput(event.target.value)}
-                            className="pagination-input"
-                        />
-                        <button type="submit" className="pagination-button">Ir</button>
-                    </form>
+                    <div className="pagination-pages" aria-label="Paginação">
+                        {paginationItems.map((pageItem) => {
+                            if (typeof pageItem === 'string') {
+                                return <span key={pageItem} className="pagination-ellipsis">...</span>;
+                            }
+
+                            return (
+                                <button
+                                    key={pageItem}
+                                    type="button"
+                                    onClick={() => paginate(pageItem)}
+                                    className={`pagination-button pagination-page-button ${pageItem === currentPage ? 'is-active' : ''}`}
+                                >
+                                    {pageItem}
+                                </button>
+                            );
+                        })}
+                    </div>
                     <button onClick={handleNextPage} disabled={currentPage === totalPages} className="pagination-button">Próxima</button>
                 </div>
              )}
@@ -1472,8 +1564,29 @@ function App() {
     // <<< NOVO: Estado para os filtros >>>
     const [filters, setFilters] = useState({
         includeArchived: false,
-        userFilter: 'me' // 'me', 'sector' ou 'all'
+        userFilter: 'me', // 'me', 'sector' ou 'all'
+        selectedSector: ''
     });
+
+    const availableSectorOptions = useMemo(() => {
+        const uniqueSectors = new Set();
+
+        solicitacoes.forEach((solicitacao) => {
+            const sectorValue = getSolicitacaoSectorValue(solicitacao);
+            uniqueSectors.add(sectorValue || EMPTY_SECTOR_FILTER);
+        });
+
+        return Array.from(uniqueSectors)
+            .sort((left, right) => {
+                if (left === EMPTY_SECTOR_FILTER) return 1;
+                if (right === EMPTY_SECTOR_FILTER) return -1;
+                return left.localeCompare(right, 'pt-BR');
+            })
+            .map((sectorValue) => ({
+                value: sectorValue,
+                label: sectorValue === EMPTY_SECTOR_FILTER ? 'Sem setor' : sectorValue
+            }));
+    }, [solicitacoes]);
 
     // Função de Logout - precisa ser definida antes de ser usada no useCallback
      const handleLogout = useCallback(() => {
@@ -1483,7 +1596,7 @@ function App() {
         setCurrentUser(null);
         setSolicitacoes([]);
         setError('');
-        setFilters({ includeArchived: false, userFilter: 'me' }); // Reseta filtros no logout
+        setFilters({ includeArchived: false, userFilter: 'me', selectedSector: '' }); // Reseta filtros no logout
         setIsLoading(false); // Garante que não fique carregando
         setIsAdminModalOpen(false); // Fecha modal admin ao deslogar
     }, []); // useCallback sem dependências
@@ -1514,7 +1627,7 @@ function App() {
 
             console.log("[App] Buscando solicitações com filtros:", currentFilters);
             const normalizedScope = userToUse.role === 'admin'
-                ? (currentFilters.userFilter || 'all')
+                ? 'all'
                 : (currentFilters.userFilter === 'sector' ? 'sector' : 'me');
             const userIdParam = normalizedScope === 'me' ? userToUse.id : null;
             const solicitacoesResponse = await getSolicitacoes(currentFilters.includeArchived, userIdParam, normalizedScope);
@@ -1560,7 +1673,8 @@ function App() {
                 setCurrentUser(user);
                 const initialFilters = {
                     includeArchived: false,
-                    userFilter: user.role === 'admin' ? 'all' : 'me'
+                    userFilter: user.role === 'admin' ? 'all' : 'me',
+                    selectedSector: ''
                 };
                 setFilters(initialFilters);
                 return fetchData(initialFilters);
@@ -1586,7 +1700,8 @@ function App() {
         getCurrentUser().then(user => {
             const initialFilters = {
                 includeArchived: false,
-                userFilter: user.role === 'admin' ? 'all' : 'me'
+                userFilter: user.role === 'admin' ? 'all' : 'me',
+                selectedSector: ''
             };
             setCurrentUser(user); // Define o usuário atual
             setFilters(initialFilters); // Reseta filtros no login
@@ -1603,11 +1718,13 @@ function App() {
     // Callback para componentes filhos solicitarem atualização de dados ou mudarem filtros
     // <<< AJUSTE: Renomeado para handleFiltersChange >>>
     const handleFiltersChange = useCallback((includeArchived, userFilterValue) => {
+        const nextUserFilter = userFilterValue !== undefined ? userFilterValue : filters.userFilter;
         const newFilters = {
             // Se includeArchived não for undefined, usa ele, senão mantém o atual
             includeArchived: includeArchived !== undefined ? includeArchived : filters.includeArchived,
             // Se userFilterValue não for undefined, usa ele, senão mantém o atual
-            userFilter: userFilterValue !== undefined ? userFilterValue : filters.userFilter
+            userFilter: nextUserFilter,
+            selectedSector: nextUserFilter === 'sector' ? filters.selectedSector : ''
         };
         console.log(`[App] Solicitação de mudança de filtros/refresh recebida:`, newFilters);
         setFilters(newFilters); // Atualiza o estado dos filtros
@@ -1621,6 +1738,29 @@ function App() {
         // Chama handleFiltersChange passando undefined para includeArchived para manter o valor atual
         handleFiltersChange(undefined, newUserFilter);
     };
+
+    const handleSectorSelectionChange = (event) => {
+        const nextSector = event.target.value;
+        setFilters((prevFilters) => ({
+            ...prevFilters,
+            selectedSector: nextSector
+        }));
+    };
+
+    useEffect(() => {
+        if (currentUser?.role !== 'admin' || filters.userFilter !== 'sector' || filters.selectedSector || availableSectorOptions.length === 0) {
+            return;
+        }
+
+        const preferredSector = currentUser?.setor && availableSectorOptions.some((option) => option.value === currentUser.setor)
+            ? currentUser.setor
+            : availableSectorOptions[0].value;
+
+        setFilters((prevFilters) => ({
+            ...prevFilters,
+            selectedSector: preferredSector
+        }));
+    }, [availableSectorOptions, currentUser, filters.selectedSector, filters.userFilter]);
 
 
     // Tela de Carregamento Inicial
@@ -1659,45 +1799,81 @@ function App() {
                 <SolicitacaoForm onSolicitacaoCriada={() => handleFiltersChange(filters.includeArchived, filters.userFilter)} />
 
                  {/* <<< NOVO: Filtro de Usuário >>> */}
-                 <div className="card filter-container">
-                     <h4>Exibir:</h4>
-                     <div className="filter-options">
-                         <label>
-                             <input
-                                 type="radio"
-                                 name="userFilter"
-                                 value="me"
-                                 checked={filters.userFilter === 'me'}
-                                 onChange={handleUserFilterChange}
-                                 disabled={isLoading} // Desabilita durante carregamento
-                             />
-                             Minhas Solicitações
-                         </label>
-                         {currentUser?.role === 'admin' ? (
-                             <label>
-                                 <input
-                                     type="radio"
-                                     name="userFilter"
-                                     value="all"
-                                     checked={filters.userFilter === 'all'}
-                                     onChange={handleUserFilterChange}
-                                     disabled={isLoading}
-                                 />
-                                 Todas
-                             </label>
-                         ) : (
-                             <label>
-                                 <input
-                                     type="radio"
-                                     name="userFilter"
-                                     value="sector"
-                                     checked={filters.userFilter === 'sector'}
-                                     onChange={handleUserFilterChange}
-                                     disabled={isLoading}
-                                 />
-                                 Meu Setor
-                             </label>
-                         )}
+                 <div className="card filter-container filter-container-compact">
+                     <div className="filter-container-heading">
+                        <h4>Visualização</h4>
+                     </div>
+                     <div className="filter-scope-toolbar">
+                        <div className="filter-options filter-options-segmented">
+                            {currentUser?.role === 'admin' ? (
+                                <>
+                                    <label className={filters.userFilter === 'all' ? 'is-active' : ''}>
+                                        <input
+                                            type="radio"
+                                            name="userFilter"
+                                            value="all"
+                                            checked={filters.userFilter === 'all'}
+                                            onChange={handleUserFilterChange}
+                                            disabled={isLoading}
+                                        />
+                                        Todas
+                                    </label>
+                                    <label className={filters.userFilter === 'sector' ? 'is-active' : ''}>
+                                        <input
+                                            type="radio"
+                                            name="userFilter"
+                                            value="sector"
+                                            checked={filters.userFilter === 'sector'}
+                                            onChange={handleUserFilterChange}
+                                            disabled={isLoading}
+                                        />
+                                        Por setor
+                                    </label>
+                                </>
+                            ) : (
+                                <>
+                                    <label className={filters.userFilter === 'me' ? 'is-active' : ''}>
+                                        <input
+                                            type="radio"
+                                            name="userFilter"
+                                            value="me"
+                                            checked={filters.userFilter === 'me'}
+                                            onChange={handleUserFilterChange}
+                                            disabled={isLoading}
+                                        />
+                                        Minhas
+                                    </label>
+                                    <label className={filters.userFilter === 'sector' ? 'is-active' : ''}>
+                                        <input
+                                            type="radio"
+                                            name="userFilter"
+                                            value="sector"
+                                            checked={filters.userFilter === 'sector'}
+                                            onChange={handleUserFilterChange}
+                                            disabled={isLoading || !currentUser?.setor}
+                                        />
+                                        Meu setor
+                                    </label>
+                                </>
+                            )}
+                        </div>
+                        {currentUser?.role === 'admin' && filters.userFilter === 'sector' && (
+                            <div className="filter-scope-select">
+                                <label htmlFor="selectedSector">Setor</label>
+                                <select
+                                    id="selectedSector"
+                                    value={filters.selectedSector}
+                                    onChange={handleSectorSelectionChange}
+                                    disabled={isLoading || availableSectorOptions.length === 0}
+                                >
+                                    {availableSectorOptions.map((sectorOption) => (
+                                        <option key={sectorOption.value} value={sectorOption.value}>
+                                            {sectorOption.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
                      </div>
                      {/* Botão de Refresh Manual 
                      <button

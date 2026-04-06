@@ -216,12 +216,30 @@ main { width: min(1400px, calc(100vw - 2rem)); padding: 2rem 0 0; margin: 0 auto
   padding-bottom: 1rem;
 }
 
+.filter-container.filter-container-compact {
+  padding: 0.9rem 1.2rem;
+}
+
+.filter-container-heading {
+  display: flex;
+  align-items: center;
+}
+
 .filter-container h4 {
   font-size: 0.9rem;
   color: var(--text-muted);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.filter-scope-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  justify-content: space-between;
+  flex-wrap: wrap;
 }
 
 .filter-options {
@@ -243,8 +261,37 @@ main { width: min(1400px, calc(100vw - 2rem)); padding: 2rem 0 0; margin: 0 auto
   cursor: pointer;
 }
 
+.filter-options label.is-active {
+  border-color: rgba(91, 192, 222, 0.4);
+  background: rgba(91, 192, 222, 0.14);
+  color: #edf8fc;
+}
+
 .filter-options input[type="radio"] {
   accent-color: var(--accent);
+}
+
+.filter-options-segmented label {
+  min-width: 112px;
+  justify-content: center;
+}
+
+.filter-scope-select {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.filter-scope-select label {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.filter-scope-select select {
+  min-width: 210px;
 }
 
 /* === TABELA E FILTROS === */
@@ -279,6 +326,33 @@ tbody tr:hover { background-color: rgba(91, 192, 222, 0.08); }
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.pagination-pages {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.pagination-page-button {
+  min-width: 38px;
+  justify-content: center;
+}
+
+.pagination-page-button.is-active {
+  background-color: rgba(91, 192, 222, 0.22);
+  border-color: rgba(91, 192, 222, 0.45);
+  color: #eefbff;
+}
+
+.pagination-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  color: #95a5a6;
+  font-size: 0.9rem;
 }
 
 .pagination-label {
