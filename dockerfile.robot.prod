@@ -1,20 +1,21 @@
 FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
 
-WORKDIR /srv/onecost
+WORKDIR /app
 
 RUN apt-get update && apt-get install -y xvfb dos2unix && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /srv/onecost/requirements.txt
-RUN pip install --no-cache-dir -r /srv/onecost/requirements.txt
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY ./robot /srv/onecost/robot
-COPY robot_entrypoint.sh /srv/onecost/robot_entrypoint.sh
+COPY ./robot /app/robot
+COPY robot_entrypoint.sh /app/robot_entrypoint.sh
 
-RUN dos2unix /srv/onecost/robot_entrypoint.sh && chmod +x /srv/onecost/robot_entrypoint.sh
-RUN test -f /srv/onecost/robot/main.py && test -f /srv/onecost/robot_entrypoint.sh
+RUN mkdir -p /srv && ln -sfn /app /srv/onecost
+RUN dos2unix /app/robot_entrypoint.sh && chmod +x /app/robot_entrypoint.sh
+RUN test -f /app/robot/main.py && test -f /app/robot_entrypoint.sh
 
-ENV APP_DIR=/srv/onecost
-ENV PYTHONPATH=/srv/onecost/robot
+ENV APP_DIR=/app
+ENV PYTHONPATH=/app/robot
 ENV PYTHONUNBUFFERED=1
 
-CMD ["/srv/onecost/robot_entrypoint.sh"]
+CMD ["/app/robot_entrypoint.sh"]
