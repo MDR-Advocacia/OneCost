@@ -1,8 +1,18 @@
 import axios from 'axios';
 
-// ---> MUDANÇA: Lê a URL da API da variável de ambiente <---
-// O valor padrão 'http://localhost:8001' será usado se REACT_APP_API_URL não estiver definida
-export const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001';
+const currentHostname = window.location.hostname;
+const isLocalLikeHost =
+  currentHostname === 'localhost' ||
+  currentHostname === '127.0.0.1' ||
+  currentHostname.endsWith('.local') ||
+  currentHostname.startsWith('192.168.') ||
+  currentHostname.startsWith('10.');
+
+const inferredApiUrl = isLocalLikeHost
+  ? `${window.location.protocol}//${currentHostname}:8001`
+  : '/api';
+
+export const API_URL = process.env.REACT_APP_API_URL || inferredApiUrl;
 console.log(`[api.js] Usando API_URL: ${API_URL}`); // Log para confirmar
 
 const api = axios.create({
