@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y postgresql-client dos2unix python3-dote
 COPY ./backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copia o entrypoint explicitamente para evitar falhas de contexto em builds remotos
+COPY ./backend/entrypoint.sh /app/entrypoint.sh
+
 # Copia TODO o conteúdo da pasta backend local para /app no container
 COPY ./backend /app
 
@@ -25,4 +28,3 @@ ENTRYPOINT ["/bin/sh", "/app/entrypoint.sh"]
 
 # Comando padrão que o entrypoint.sh irá executar via 'exec "$@"'
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
-
