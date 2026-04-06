@@ -88,6 +88,10 @@ class User(UserBase):
 class UserUpdateStatus(BaseModel):
     is_active: bool
 
+
+class UserAdBackfillRequest(BaseModel):
+    dry_run: bool = True
+
 # --- Schema para Solicitação de Custa (Base) ---
 class SolicitacaoCustaBase(BaseModel):
     npj: str

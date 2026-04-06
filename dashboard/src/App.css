@@ -528,6 +528,46 @@ tbody tr:hover { background-color: rgba(91, 192, 222, 0.08); }
   margin-top: 1rem;
 }
 
+.admin-backfill-description {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin-bottom: 1rem;
+}
+
+.admin-backfill-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.admin-backfill-stat {
+  padding: 0.8rem 0.9rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.admin-backfill-stat span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.admin-backfill-stat strong {
+  font-size: 1.15rem;
+  color: var(--text-main);
+}
+
+.admin-backfill-results {
+  margin-top: 1rem;
+}
+
 
 /* === ÍCONES GERAIS === */
 .icon { display: inline-block; vertical-align: middle; width: 1rem; height: 1rem; }

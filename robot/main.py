@@ -292,9 +292,14 @@ def main():
                             "status_robo": resultado_processamento.get("status_robo", "Erro: Status Desconhecido"), 
                             # ----------------------------
                             "status_portal": resultado_processamento.get("status_portal"),
+                            "especificacao": resultado_processamento.get("especificacao"),
                             "comprovantes_path": [str(p) for p in resultado_processamento.get("comprovantes_path", []) if p],  # Garante strings e remove vazios (Nome da chave corrigido no custos_manager)
                             "numero_processo": resultado_processamento.get("numero_processo"),
-                            "usuario_confirmacao_id": resultado_processamento.get("usuario_confirmacao_id")  # Inclui ID se o robô confirmou
+                            "usuario_confirmacao_id": resultado_processamento.get("usuario_confirmacao_id"),  # Inclui ID se o robô confirmou
+                            "monitoramento_ativo": resultado_processamento.get("monitoramento_ativo"),
+                            "motivo_encerramento": resultado_processamento.get("motivo_encerramento"),
+                            "proxima_verificacao_em": resultado_processamento.get("proxima_verificacao_em"),
+                            "alerta_enviado_em": resultado_processamento.get("alerta_enviado_em"),
                         }
 
                         log.debug(f"Payload para API (ID {sol_id_final}): {json.dumps(payload_api, default=str)}")

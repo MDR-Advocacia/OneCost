@@ -100,6 +100,7 @@ services:
       ONELOG_USERNAME: ${ONELOG_USERNAME}
       ONELOG_PASSWORD: ${ONELOG_PASSWORD}
       LOKI_URL: ${LOKI_URL}
+      ROBOT_CYCLE_DELAY_SECONDS: ${ROBOT_CYCLE_DELAY_SECONDS:-60}
     depends_on:
       - onecost-backend
     volumes:

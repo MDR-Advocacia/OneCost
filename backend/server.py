@@ -21,8 +21,8 @@ import schemas
 from bd import models
 from bd.database import SessionLocal, engine
 from auth import verify_password, create_access_token, get_password_hash
-from ad_integration import autenticar_e_obter_setor, listar_ous_bb_ad
-from config import ACCESS_TOKEN_EXPIRE_MINUTES, SECRET_KEY, ALGORITHM
+from ad_integration import autenticar_e_obter_setor, listar_ous_bb_ad, mapear_setores_bb_por_usuarios
+from config import ACCESS_TOKEN_EXPIRE_MINUTES, SECRET_KEY, ALGORITHM, ADMIN_USERNAME
 
 from jose import JWTError, jwt
 from pydantic import BaseModel, ValidationError
@@ -32,6 +32,14 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("server")
 
 app = FastAPI()
+PROTECTED_BACKFILL_USERNAMES = {
+    username
+    for username in {
+        ADMIN_USERNAME,
+        os.getenv("ROBOT_USERNAME", "robot"),
+    }
+    if username
+}
 
 # --- MUDANÇA 2: USAR O INSTRUMENTADOR ---
 # Isso instrumenta o app (conta requests, etc.) e já expõe a rota /metrics
@@ -156,12 +164,18 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     user = None
     local_user = get_user(db, username=form_data.username)
     password_verified = local_user and verify_password(form_data.password, local_user.hashed_password)
+    is_bootstrap_admin = (
+        local_user
+        and password_verified
+        and local_user.is_active
+        and local_user.role == "admin"
+        and local_user.username == ADMIN_USERNAME
+    )
 
     # Contas administrativas locais não devem depender do AD para autenticar.
-    if local_user and password_verified and local_user.is_active:
-        if local_user.role == "admin":
-            user = local_user
-            log.info(f"[/login] Login local prioritario aceito para '{form_data.username}'.")
+    if is_bootstrap_admin:
+        user = local_user
+        log.info(f"[/login] Login local prioritario aceito para '{form_data.username}'.")
 
     if not user:
         ad_result = autenticar_e_obter_setor(form_data.username, form_data.password)
@@ -169,6 +183,17 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
             user = sync_ad_user(db, form_data.username, ad_result["setor"])
             log.info(f"[/login] Login AD aceito para '{form_data.username}' no setor '{user.setor}'.")
         elif local_user and password_verified and local_user.is_active:
+            if local_user.auth_provider == "ad":
+                log.warning(
+                    "[/login] Login local bloqueado para '%s' porque o usuário é gerenciado pelo AD.",
+                    form_data.username,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=ad_result.get("mensagem") or "Usuario gerenciado pelo Active Directory. Use sua credencial do Windows.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
             user = local_user
             log.info(f"[/login] Login local de fallback aceito para '{form_data.username}'.")
         else:
@@ -205,6 +230,164 @@ def read_my_sector(current_user: models.User = Depends(get_current_active_user))
 def read_ad_sectors(current_user: models.User = Depends(require_admin_role)):
     setores = listar_ous_bb_ad()
     return {"setores": setores}
+
+
+@app.post("/users/backfill-ad", dependencies=[Depends(require_admin_role)])
+def backfill_local_users_with_ad(
+    payload: schemas.UserAdBackfillRequest = schemas.UserAdBackfillRequest(),
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(require_admin_role),
+):
+    dry_run = payload.dry_run
+    log.info(
+        "[POST /users/backfill-ad] Admin '%s' iniciou backfill AD (dry_run=%s).",
+        current_admin.username,
+        dry_run,
+    )
+
+    local_users = (
+        db.query(models.User)
+        .filter(models.User.auth_provider == "local")
+        .order_by(models.User.username)
+        .all()
+    )
+
+    results = []
+    candidate_users = []
+    summary = {
+        "usuarios_locais": len(local_users),
+        "candidatos": 0,
+        "atualizaveis": 0,
+        "atualizados": 0,
+        "sem_alteracao": 0,
+        "nao_encontrados": 0,
+        "sem_setor_bb": 0,
+        "ignorados": 0,
+        "erros": 0,
+    }
+
+    for user in local_users:
+        if user.username in PROTECTED_BACKFILL_USERNAMES:
+            summary["ignorados"] += 1
+            results.append({
+                "user_id": user.id,
+                "username": user.username,
+                "role": user.role,
+                "auth_provider": user.auth_provider,
+                "current_setor": user.setor,
+                "ad_setor": None,
+                "action": "skipped",
+                "detail": "Conta de sistema ignorada no backfill.",
+            })
+            continue
+        candidate_users.append(user)
+
+    summary["candidatos"] = len(candidate_users)
+
+    if not candidate_users:
+        return {
+            "dry_run": dry_run,
+            "summary": summary,
+            "results": results,
+        }
+
+    try:
+        ad_results = mapear_setores_bb_por_usuarios([user.username for user in candidate_users])
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    try:
+        for user in candidate_users:
+            ad_result = ad_results.get(user.username, {
+                "status": "erro",
+                "mensagem": "Usuario nao retornou resultado do AD.",
+            })
+            ad_status = ad_result.get("status")
+            ad_setor = ad_result.get("setor")
+
+            row = {
+                "user_id": user.id,
+                "username": user.username,
+                "role": user.role,
+                "auth_provider": user.auth_provider,
+                "current_setor": user.setor,
+                "ad_setor": ad_setor,
+                "action": "",
+                "detail": "",
+            }
+
+            if ad_status == "sucesso":
+                should_update_setor = (user.setor or "").strip() != (ad_setor or "").strip()
+                should_promote_provider = user.auth_provider != "ad"
+
+                if not should_update_setor and not should_promote_provider:
+                    summary["sem_alteracao"] += 1
+                    row["action"] = "no_change"
+                    row["detail"] = "Usuario ja esta alinhado ao AD."
+                else:
+                    summary["atualizaveis"] += 1
+                    row["action"] = "update"
+                    detalhes = []
+                    if should_update_setor:
+                        detalhes.append(
+                            f"setor {'vazio' if not user.setor else user.setor!r} -> {ad_setor!r}"
+                        )
+                    if should_promote_provider:
+                        detalhes.append(f"origem {user.auth_provider!r} -> 'ad'")
+                    row["detail"] = ", ".join(detalhes)
+                    if not dry_run:
+                        if should_update_setor:
+                            user.setor = ad_setor
+                        if should_promote_provider:
+                            user.auth_provider = "ad"
+                        summary["atualizados"] += 1
+            elif ad_status == "nao_encontrado":
+                summary["nao_encontrados"] += 1
+                row["action"] = "not_found"
+                row["detail"] = ad_result.get("mensagem", "Usuario nao encontrado no AD.")
+            elif ad_status == "sem_setor_bb":
+                summary["sem_setor_bb"] += 1
+                row["action"] = "no_bb_sector"
+                row["detail"] = ad_result.get("mensagem", "Usuario sem OU BB_ no AD.")
+            else:
+                summary["erros"] += 1
+                row["action"] = "error"
+                row["detail"] = ad_result.get("mensagem", "Erro ao consultar o AD.")
+
+            results.append(row)
+
+        if not dry_run and summary["atualizados"] > 0:
+            db.commit()
+            log.info(
+                "[POST /users/backfill-ad] Backfill aplicado com sucesso. %s usuarios atualizados.",
+                summary["atualizados"],
+            )
+    except Exception as exc:
+        db.rollback()
+        log.error("[POST /users/backfill-ad] Falha ao aplicar backfill: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro interno ao aplicar o backfill de usuarios.",
+        ) from exc
+
+    action_order = {
+        "update": 0,
+        "error": 1,
+        "not_found": 2,
+        "no_bb_sector": 3,
+        "no_change": 4,
+        "skipped": 5,
+    }
+    results.sort(key=lambda item: (action_order.get(item["action"], 99), item["username"]))
+
+    return {
+        "dry_run": dry_run,
+        "summary": summary,
+        "results": results,
+    }
 
 @app.post("/users/", response_model=schemas.User, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin_role)])
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db), current_admin: models.User = Depends(require_admin_role)):

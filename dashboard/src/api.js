@@ -90,6 +90,13 @@ export const getCurrentUser = async () => {
     return response.data;
 };
 
+export const getAdSectors = async () => {
+    console.log("[api.js] Buscando /sectors/...");
+    const response = await api.get('/sectors/');
+    console.log("[api.js] Setores do AD:", response.data);
+    return response.data?.setores || [];
+};
+
 
 // --- FUNÇÕES DE SOLICITAÇÕES DE CUSTAS ---
 
@@ -154,6 +161,13 @@ export const listUsers = async () => {
     console.log("[api.js] Buscando GET /users/");
     const response = await api.get('/users/');
     console.log(`[api.js] Recebidos ${response.data.length} usuários.`);
+    return response.data;
+};
+
+export const backfillUsersFromAd = async (dryRun = true) => {
+    console.log(`[api.js] Enviando POST /users/backfill-ad : { dry_run: ${dryRun} }`);
+    const response = await api.post('/users/backfill-ad', { dry_run: dryRun });
+    console.log("[api.js] Resultado do backfill AD:", response.data);
     return response.data;
 };
 

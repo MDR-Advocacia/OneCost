@@ -16,4 +16,4 @@ ENV APP_DIR=/app
 ENV PYTHONPATH=/app/robot
 ENV PYTHONUNBUFFERED=1
 
-CMD ["sh", "-lc", "xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' python /app/robot/main.py"]
+CMD ["sh", "-lc", "while true; do xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' python /app/robot/main.py; EXIT_CODE=$?; echo \"[robot-entrypoint] ciclo finalizado com exit code ${EXIT_CODE}. Proximo ciclo em ${ROBOT_CYCLE_DELAY_SECONDS:-60}s.\"; sleep ${ROBOT_CYCLE_DELAY_SECONDS:-60}; done"]

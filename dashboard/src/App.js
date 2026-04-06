@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import {
     API_URL,
     getCurrentUser,
+    getAdSectors,
     getSolicitacoes,
     createSolicitacao,
     updateSolicitacao,
@@ -11,6 +12,7 @@ import {
     resetarErrosSolicitacoes,
     createUser,
     listUsers,
+    backfillUsersFromAd,
     updateUserStatus,
     updateUser // <<< NOVO: Importa a função updateUser
 } from './api';
@@ -151,6 +153,18 @@ const getStatusBancoFilterValue = (statusPortal) => {
 const getStatusBancoFilterLabel = (statusPortal) => {
     const normalizedStatus = String(statusPortal || '').trim();
     return normalizedStatus || 'Sem retorno do banco';
+};
+
+const getBackfillActionLabel = (action) => {
+    const labels = {
+        update: 'Atualizar',
+        no_change: 'Sem alteração',
+        not_found: 'Não encontrado',
+        no_bb_sector: 'Sem OU BB_',
+        skipped: 'Ignorado',
+        error: 'Erro',
+    };
+    return labels[action] || action || 'N/A';
 };
 
 const buildPaginationItems = (currentPage, totalPages) => {
@@ -619,6 +633,8 @@ const UserListTable = ({ users: initialUsers = [], currentUser, onUserListChange
                         <tr>
                             <th>ID</th>
                             <th>Username</th>
+                            <th>Setor</th>
+                            <th>Origem</th>
                             <th>Role</th>
                             <th>Status</th>
                             <th style={{ textAlign: 'center' }}>Ações</th> {/* Centraliza cabeçalho Ações */}
@@ -637,6 +653,8 @@ const UserListTable = ({ users: initialUsers = [], currentUser, onUserListChange
                                     <tr key={user.id}>
                                         <td>{user.id}</td>
                                         <td>{user.username}</td>
+                                        <td>{user.setor || 'Sem setor'}</td>
+                                        <td>{user.auth_provider === 'ad' ? 'AD' : 'Local'}</td>
                                         <td>{user.role}</td>
                                         <td>{user.is_active ? 'Ativo' : 'Inativo'}</td>
                                         <td style={{ textAlign: 'center' }}> {/* Centraliza botões */}
@@ -664,7 +682,7 @@ const UserListTable = ({ users: initialUsers = [], currentUser, onUserListChange
                                 );
                             })
                         ) : (
-                            <tr><td colSpan="5" className="table-empty-message">Nenhum outro usuário encontrado.</td></tr>
+                            <tr><td colSpan="7" className="table-empty-message">Nenhum outro usuário encontrado.</td></tr>
                         )}
                     </tbody>
                 </table>
@@ -801,6 +819,129 @@ const UserEditModal = ({ userToEdit, onClose, onUserUpdated }) => {
     );
 };
 
+const AdBackfillPanel = ({ onBackfillApplied }) => {
+    const [report, setReport] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
+    const [runningMode, setRunningMode] = useState('preview');
+
+    const runBackfill = async (dryRun) => {
+        setIsLoading(true);
+        setRunningMode(dryRun ? 'preview' : 'apply');
+        setError('');
+        setSuccess('');
+
+        try {
+            const result = await backfillUsersFromAd(dryRun);
+            setReport(result);
+
+            if (dryRun) {
+                setSuccess(
+                    `Prévia concluída: ${result.summary?.atualizaveis || 0} usuário(s) podem ser sincronizados com o AD.`
+                );
+            } else {
+                setSuccess(
+                    `Backfill aplicado: ${result.summary?.atualizados || 0} usuário(s) atualizados e promovidos para autenticação via AD.`
+                );
+                if (onBackfillApplied) {
+                    onBackfillApplied();
+                }
+            }
+        } catch (err) {
+            const detail = err.response?.data?.detail || err.message;
+            setError(`Falha no backfill AD: ${detail}`);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleApply = async () => {
+        if (!window.confirm("Aplicar o backfill agora? Usuários sincronizados passarão a exigir autenticação via AD.")) {
+            return;
+        }
+        await runBackfill(false);
+    };
+
+    const canApplyBackfill = !isLoading && (
+        !report ||
+        (report.summary?.atualizaveis || 0) > 0
+    );
+
+    return (
+        <section className="admin-section">
+            <h4>Backfill de Usuários Locais via AD</h4>
+            <p className="admin-backfill-description">
+                Faz a conciliação por <strong>username</strong>, atualiza o setor a partir do Active Directory
+                e converte os usuários encontrados para origem <strong>AD</strong>, bloqueando o fallback local.
+            </p>
+            <div className="admin-actions-container">
+                <button
+                    onClick={() => runBackfill(true)}
+                    disabled={isLoading}
+                    className="button secondary small"
+                >
+                    {isLoading && runningMode === 'preview' ? 'Gerando prévia...' : 'Prévia do Backfill'}
+                </button>
+                <button
+                    onClick={handleApply}
+                    disabled={!canApplyBackfill}
+                    className="button primary small"
+                >
+                    {isLoading && runningMode === 'apply' ? 'Aplicando...' : 'Aplicar Backfill'}
+                </button>
+            </div>
+            {error && <p className="form-message error">{error}</p>}
+            {success && <p className="form-message success">{success}</p>}
+
+            {report?.summary && (
+                <div className="admin-backfill-summary">
+                    <div className="admin-backfill-stat"><span>Locais</span><strong>{report.summary.usuarios_locais || 0}</strong></div>
+                    <div className="admin-backfill-stat"><span>Candidatos</span><strong>{report.summary.candidatos || 0}</strong></div>
+                    <div className="admin-backfill-stat"><span>Atualizáveis</span><strong>{report.summary.atualizaveis || 0}</strong></div>
+                    <div className="admin-backfill-stat"><span>Atualizados</span><strong>{report.summary.atualizados || 0}</strong></div>
+                    <div className="admin-backfill-stat"><span>Sem alteração</span><strong>{report.summary.sem_alteracao || 0}</strong></div>
+                    <div className="admin-backfill-stat"><span>Não encontrados</span><strong>{report.summary.nao_encontrados || 0}</strong></div>
+                    <div className="admin-backfill-stat"><span>Sem OU BB_</span><strong>{report.summary.sem_setor_bb || 0}</strong></div>
+                    <div className="admin-backfill-stat"><span>Ignorados</span><strong>{report.summary.ignorados || 0}</strong></div>
+                    <div className="admin-backfill-stat"><span>Erros</span><strong>{report.summary.erros || 0}</strong></div>
+                </div>
+            )}
+
+            {report?.results?.length > 0 && (
+                <div className="admin-backfill-results">
+                    <div className="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Username</th>
+                                    <th>Origem</th>
+                                    <th>Setor atual</th>
+                                    <th>Setor AD</th>
+                                    <th>Ação</th>
+                                    <th>Detalhe</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {report.results.map((row) => (
+                                    <tr key={`${row.username}-${row.action}`}>
+                                        <td>{row.username}</td>
+                                        <td>{row.auth_provider === 'ad' ? 'AD' : 'Local'}</td>
+                                        <td>{row.current_setor || 'Sem setor'}</td>
+                                        <td>{row.ad_setor || 'N/A'}</td>
+                                        <td>{getBackfillActionLabel(row.action)}</td>
+                                        <td>{row.detail || 'N/A'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+        </section>
+    );
+};
+
 // Componente do Painel de Administração (AdminPanelModal)
 // <<< AJUSTES: Adiciona handlers para abrir/fechar UserEditModal >>>
 const AdminPanelModal = ({ currentUser, onDataRefresh, isOpen, onClose }) => {
@@ -916,6 +1057,8 @@ const AdminPanelModal = ({ currentUser, onDataRefresh, isOpen, onClose }) => {
                                 />
                             )}
                         </section>
+                        <hr className="modal-divider"/>
+                        <AdBackfillPanel onBackfillApplied={refreshUserList} />
                          <hr className="modal-divider"/>
                         <section className="admin-section">
                              <h4>Ações Gerais</h4>
@@ -1294,6 +1437,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                             <th>Data Solicitação</th>
                             <th>Prazo Fatal</th>
                             <th>Criado Por</th>
+                            <th>Setor</th>
                             <th style={{minWidth: '220px'}}>Status Banco</th>
                             <th style={{minWidth: '220px'}}>Status Robô</th>
                             <th style={{textAlign: 'center'}}>Ações</th>
@@ -1335,6 +1479,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                             </span>
                                         </td>
                                         <td>{item.usuario_criacao?.username || 'N/A'}</td>
+                                        <td>{getSolicitacaoSectorValue(item) || 'Sem setor'}</td>
                                         <td>
                                           <div className="status-cell status-cell-stacked">
                                             <span
@@ -1367,7 +1512,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                     </tr>
                                 );
                             })
-                        ) : ( <tr><td colSpan="9" className="table-empty-message">Nenhuma solicitação encontrada com os filtros aplicados.</td></tr> )}
+                        ) : ( <tr><td colSpan="10" className="table-empty-message">Nenhuma solicitação encontrada com os filtros aplicados.</td></tr> )}
                     </tbody>
                 </table>
              </div>
@@ -1560,6 +1705,7 @@ function App() {
     const [solicitacoes, setSolicitacoes] = useState([]);
     const [error, setError] = useState(''); // Erro global da aplicação
     const [isAdminModalOpen, setIsAdminModalOpen] = useState(false); // Estado do modal admin
+    const [directorySectorOptions, setDirectorySectorOptions] = useState([]);
 
     // <<< NOVO: Estado para os filtros >>>
     const [filters, setFilters] = useState({
@@ -1576,6 +1722,13 @@ function App() {
             uniqueSectors.add(sectorValue || EMPTY_SECTOR_FILTER);
         });
 
+        directorySectorOptions.forEach((sectorValue) => {
+            const normalizedSector = String(sectorValue || '').trim();
+            if (normalizedSector) {
+                uniqueSectors.add(normalizedSector);
+            }
+        });
+
         return Array.from(uniqueSectors)
             .sort((left, right) => {
                 if (left === EMPTY_SECTOR_FILTER) return 1;
@@ -1586,7 +1739,7 @@ function App() {
                 value: sectorValue,
                 label: sectorValue === EMPTY_SECTOR_FILTER ? 'Sem setor' : sectorValue
             }));
-    }, [solicitacoes]);
+    }, [directorySectorOptions, solicitacoes]);
 
     // Função de Logout - precisa ser definida antes de ser usada no useCallback
      const handleLogout = useCallback(() => {
@@ -1597,6 +1750,7 @@ function App() {
         setSolicitacoes([]);
         setError('');
         setFilters({ includeArchived: false, userFilter: 'me', selectedSector: '' }); // Reseta filtros no logout
+        setDirectorySectorOptions([]);
         setIsLoading(false); // Garante que não fique carregando
         setIsAdminModalOpen(false); // Fecha modal admin ao deslogar
     }, []); // useCallback sem dependências
@@ -1761,6 +1915,32 @@ function App() {
             selectedSector: preferredSector
         }));
     }, [availableSectorOptions, currentUser, filters.selectedSector, filters.userFilter]);
+
+    useEffect(() => {
+        if (currentUser?.role !== 'admin') {
+            setDirectorySectorOptions([]);
+            return;
+        }
+
+        let isMounted = true;
+
+        getAdSectors()
+            .then((sectors) => {
+                if (isMounted) {
+                    setDirectorySectorOptions(Array.isArray(sectors) ? sectors : []);
+                }
+            })
+            .catch((err) => {
+                console.error("[App] Falha ao carregar setores do AD:", err);
+                if (isMounted) {
+                    setDirectorySectorOptions([]);
+                }
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [currentUser?.role]);
 
 
     // Tela de Carregamento Inicial
