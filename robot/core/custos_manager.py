@@ -79,20 +79,20 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
         valor_bd = Decimal("0.0")
 
     # Estrutura do resultado a ser retornado para a API
-        resultado_final = {
-            "solicitacao_id": solicitacao_id,
-            "numero_processo": numero_processo_bd, # Inicia com o valor do BD, será atualizado se encontrado
-            "especificacao": None, # Campo para a especificação
-            "comprovantes_path": [], # Lista de caminhos relativos (NOME CORRETO PARA A API)
-            "status_portal": None, # Status lido do portal (o último lido)
-            "status_robo": "Erro: Falha não especificada", # Status final para o OneCost (NOME CORRETO)
-            "usuario_confirmacao_id": None, # ID do robô se ele confirmar
-            "monitoramento_ativo": True,
-            "motivo_encerramento": None,
-            "proxima_verificacao_em": None,
-            "alerta_enviado_em": None,
-            "dados_custas_encontrados_debug": {} # Dados lidos da linha da tabela (mantido para logs/debug)
-        }
+    resultado_final = {
+        "solicitacao_id": solicitacao_id,
+        "numero_processo": numero_processo_bd, # Inicia com o valor do BD, será atualizado se encontrado
+        "especificacao": None, # Campo para a especificação
+        "comprovantes_path": [], # Lista de caminhos relativos (NOME CORRETO PARA A API)
+        "status_portal": None, # Status lido do portal (o último lido)
+        "status_robo": "Erro: Falha não especificada", # Status final para o OneCost (NOME CORRETO)
+        "usuario_confirmacao_id": None, # ID do robô se ele confirmar
+        "monitoramento_ativo": True,
+        "motivo_encerramento": None,
+        "proxima_verificacao_em": None,
+        "alerta_enviado_em": None,
+        "dados_custas_encontrados_debug": {} # Dados lidos da linha da tabela (mantido para logs/debug)
+    }
 
     logging.info(f"Iniciando processamento para Solicitação ID: {solicitacao_id}, NPJ: {npj_para_buscar}")
 
