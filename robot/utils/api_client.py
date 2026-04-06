@@ -1,3 +1,4 @@
+import os
 import requests
 import logging
 from typing import Optional, Dict, List, Any
@@ -10,7 +11,7 @@ try:
     from config import API_BASE_URL, ROBOT_USERNAME
 except ImportError:
     # Fallback se executado de forma isolada
-    API_BASE_URL = "http://localhost:8001"
+    API_BASE_URL = os.getenv("API_BASE_URL", "http://onecost-backend:8000")
     ROBOT_USERNAME = "robô_desconhecido" # Define um fallback
 
 
@@ -182,8 +183,7 @@ def get_proxima_solicitacao_pendente() -> Optional[Dict[str, Any]]:
 def get_todas_solicitacoes_pendentes() -> List[Dict[str, Any]]:
     """Busca TODAS as solicitações com status 'Pendente'."""
     get_url = f"{API_BASE_URL}/solicitacoes/"
-    # Busca por status "Pendente" e um limite alto
-    params = {"status_robo": "Pendente", "limit": 500}
+    params = {"status_robo": "Pendente"}
     headers = _get_auth_headers()
     if not _api_token:
         log.error("Não é possível buscar solicitações: Robô não autenticado (token ausente).")

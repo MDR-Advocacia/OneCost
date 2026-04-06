@@ -3,7 +3,7 @@ import logging
 import sys
 import time
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime
 from playwright.sync_api import sync_playwright, Error as PlaywrightError
 import json
 from decimal import Decimal, InvalidOperation
@@ -25,7 +25,7 @@ try:
     # Importações de configuração
     from config import (
         URL_PORTAL_CUSTAS, LOG_DIR, ROBOT_USERNAME, ROBOT_PASSWORD,
-        API_BASE_URL, SESSION_TIMEOUT_SECONDS
+        SESSION_TIMEOUT_SECONDS
     )
     # Importações dos módulos core
     from core.browser_manager import realizar_login_automatico
@@ -101,6 +101,7 @@ def main():
     log.info("=" * 60)
     log.info(f"INICIANDO ROBO ONECOST | LOG: {log_filename}")
     log.info("=" * 60)
+    run_started_at = time.time()
 
     # --- DEFINIÇÃO DAS MÉTRICAS (PROMETHEUS - DESATIVADO) ---
     # registry = CollectorRegistry()
@@ -147,7 +148,8 @@ def main():
         if not robot_login(ROBOT_USERNAME, ROBOT_PASSWORD):
             # Se o login na API falhar, não adianta continuar
             log.critical("Falha ao autenticar robô na API. Encerrando.")
-            sys.exit(1)  # Sai com código de erro
+            general_exit_code = 1
+            return general_exit_code
 
         # FASE -0.5: Resetar Solicitações com Erro (Agora Ativo)
         log.info("FASE -0.5: Tentando resetar solicitações com status de erro...")
@@ -164,9 +166,7 @@ def main():
         # Se não houver solicitações, encerra o ciclo com sucesso
         if not solicitacoes_para_processar:
             log.info("Nenhuma solicitação pendente para processar. Encerrando ciclo.")
-            # Definimos sucesso aqui antes de sair
-            # g_robot_run_success.set(1) # DESATIVADO
-            sys.exit(0)  # Sai com sucesso
+            return general_exit_code
 
         log.info(f"Encontradas {len(solicitacoes_para_processar)} solicitações pendentes para processar.")
 
@@ -374,27 +374,12 @@ def main():
             # g_robot_run_success.set(0)  # <-- MARCA FALHA (DESATIVADO)
         log.info("=" * 60)
         
-        # --- BLOCO DE PUSH DAS MÉTRICAS (PROMETHEUS - DESATIVADO) ---
-        try:
-             duration = time.time() - start_time
-             s_robot_run_duration.observe(duration)
-             g_solicitacoes_processadas.set(processed_count) # Seta o total processado com sucesso
+        duration = time.time() - run_started_at
+        log.info(f"Duracao total deste ciclo: {duration:.2f}s")
 
-             log.info(f"Enviando métricas para Pushgateway em http://192.168.0.30:9091...")
-             push_to_gateway(
-                 "192.168.0.30:9091",  # IP do seu servidor de monitoramento
-                 job="onecost-robot", 
-                 registry=registry
-             )
-             log.info("Métricas enviadas com sucesso.")
-        except Exception as e_metric:
-             log.error(f"Falha ao enviar métricas para o Pushgateway: {e_metric}")
-        # --- FIM DO BLOCO PROMETHEUS ---
-
-        # Sai do script Python com o código de status apropriado
-        sys.exit(general_exit_code)
+    return general_exit_code
 
 # --- Ponto de Entrada Padrão do Script ---
 if __name__ == "__main__":
     print("[main.py] Bloco __main__ iniciado. Chamando a funcao main()...")
-    main()
+    sys.exit(main())

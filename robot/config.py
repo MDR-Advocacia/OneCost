@@ -50,7 +50,7 @@ ONELOG_PASSWORD = os.getenv("ONELOG_PASSWORD", "senha_ad")
 DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT_MS", "60000")) 
 
 # URLs das APIs
-API_BASE_URL = os.getenv("API_BASE_URL", "http://backend:8000")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://onecost-backend:8000")
 ONELOG_API_URL = os.getenv("ONELOG_API_URL", "http://api-onelog.mdradvocacia.com")
 
 # Tempo limite da sessão do portal em segundos
