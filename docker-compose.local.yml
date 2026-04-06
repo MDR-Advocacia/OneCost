@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:13
+    container_name: onecost_db
+    env_file:
+      - .env
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: onecost_backend
+    command: ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ./backend:/app
+      - ./comprovantes:/app/static/comprovantes
+    ports:
+      - "8001:8000"
+    depends_on:
+      - db
+    restart: always
+    env_file:
+      - .env
+
+  dashboard:
+    build:
+      context: ./dashboard
+    container_name: onecost_dashboard
+    volumes:
+      - ./dashboard/src:/app/src
+    ports:
+      - "3001:3000"
+    environment:
+      - PORT=3000
+    depends_on:
+      - backend
+    restart: always
+    env_file:
+      - .env
+
+  robot:
+    build:
+      context: .
+      dockerfile: dockerfile.robot
+    container_name: onecost_robot
+    volumes:
+      - ./robot:/app/robot
+      - ./comprovantes:/app/comprovantes
+    depends_on:
+      - backend
+    restart: always
+    env_file:
+      - .env
+    deploy:
+      resources:
+        limits:
+          memory: 800M
+
+volumes:
+  postgres_data:

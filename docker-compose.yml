@@ -1,67 +1,109 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:13
-    container_name: onecost_db
-    env_file:
-      - .env
-    ports:
-      - "5434:5432"
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-onecost}
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-onecost}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.40"
+          memory: 384M
+        reservations:
+          memory: 128M
 
   backend:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: onecost_backend
-    command: ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-    volumes:
-      - ./backend:/app
-      - ./comprovantes:/app/static/comprovantes
-    ports:
-      - "8001:8000"
+      context: ./backend
+      dockerfile: Dockerfile.coolify
+    restart: unless-stopped
+    environment:
+      APP_DIR: /app
+      COMPROVANTES_STATIC_DIR: /app/static/comprovantes
+      DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-onecost}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      SECRET_KEY: ${SECRET_KEY}
+      ALGORITHM: ${ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      AD_SERVER_IP: ${AD_SERVER_IP}
+      AD_DOMAIN: ${AD_DOMAIN}
+      AD_BASE_DN: ${AD_BASE_DN:-DC=mdr,DC=local}
+      AD_SERVICE_USER: ${AD_SERVICE_USER}
+      AD_SERVICE_PASS: ${AD_SERVICE_PASS}
+      ONELOG_USERNAME: ${ONELOG_USERNAME}
+      ONELOG_PASSWORD: ${ONELOG_PASSWORD}
+      ROBOT_USERNAME: ${ROBOT_USERNAME:-robot}
+      ROBOT_PASSWORD: ${ROBOT_PASSWORD}
     depends_on:
-      - db
-    restart: always
-    env_file:
-      - .env
+      db:
+        condition: service_healthy
+    volumes:
+      - comprovantes_data:/app/static/comprovantes
+    deploy:
+      resources:
+        limits:
+          cpus: "0.60"
+          memory: 512M
+        reservations:
+          memory: 256M
 
   dashboard:
     build:
       context: ./dashboard
-    container_name: onecost_dashboard
-    volumes:
-      - ./dashboard/src:/app/src
-    ports:
-      - "3001:3000"
-    environment:
-      - PORT=3000
+      dockerfile: Dockerfile.prod
+      args:
+        REACT_APP_API_URL: ${REACT_APP_API_URL}
+    restart: unless-stopped
     depends_on:
       - backend
-    restart: always
-    env_file:
-      - .env
-
-  robot:
-    build:
-      context: .
-      dockerfile: dockerfile.robot
-    container_name: onecost_robot
-    volumes:
-      - ./robot:/app/robot
-      - ./comprovantes:/app/comprovantes
-    depends_on:
-      - backend
-    restart: always
-    env_file:
-      - .env
     deploy:
       resources:
         limits:
-          memory: 800M
+          cpus: "0.25"
+          memory: 256M
+        reservations:
+          memory: 96M
+
+  robot:
+    build:
+      context: ./robot
+      dockerfile: Dockerfile.coolify
+    restart: unless-stopped
+    shm_size: 1gb
+    environment:
+      APP_DIR: /app
+      API_BASE_URL: ${API_BASE_URL:-http://backend:8000}
+      ROBOT_USERNAME: ${ROBOT_USERNAME:-robot}
+      ROBOT_PASSWORD: ${ROBOT_PASSWORD}
+      ONELOG_API_URL: ${ONELOG_API_URL}
+      ONELOG_USERNAME: ${ONELOG_USERNAME}
+      ONELOG_PASSWORD: ${ONELOG_PASSWORD}
+      LOKI_URL: ${LOKI_URL}
+    depends_on:
+      - backend
+    volumes:
+      - comprovantes_data:/app/comprovantes
+    deploy:
+      resources:
+        limits:
+          cpus: "0.80"
+          memory: 1280M
+        reservations:
+          memory: 384M
 
 volumes:
   postgres_data:
+  comprovantes_data:
