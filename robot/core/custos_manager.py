@@ -36,6 +36,25 @@ def _converter_valor_para_decimal(valor_texto: Optional[str]) -> Optional[Decima
         logging.error(f"Erro ao converter valor '{valor_texto}' para Decimal.")
         return None
 
+def _normalizar_numero_solicitacao(valor: Any) -> str:
+    """Normaliza números de solicitação para comparação tolerante."""
+    texto = "" if valor is None else str(valor).strip()
+    if not texto:
+        return ""
+
+    try:
+        decimal_value = Decimal(texto.replace(",", "."))
+        if decimal_value == decimal_value.to_integral_value():
+            return str(int(decimal_value))
+    except (InvalidOperation, ValueError):
+        pass
+
+    somente_digitos = re.sub(r"\D", "", texto)
+    if somente_digitos:
+        return somente_digitos.lstrip("0") or "0"
+
+    return texto
+
 def _comparar_valores(valor_bd: Optional[Decimal], valor_portal_texto: Optional[str]) -> bool:
     """Compara um Decimal do BD com uma string de valor do portal."""
     if valor_bd is None or valor_portal_texto is None:
@@ -50,6 +69,25 @@ def _comparar_valores(valor_bd: Optional[Decimal], valor_portal_texto: Optional[
     # Compara com uma pequena tolerância para evitar problemas de arredondamento float vs Decimal
     comparacao = abs(valor_bd - valor_portal_decimal) < Decimal('0.001')
     logging.debug(f"Comparando Valor BD ({valor_bd}) com Valor Portal ({valor_portal_decimal}): {'Iguais' if comparacao else 'Diferentes'}")
+    return comparacao
+
+def _comparar_numero_solicitacao(valor_bd: Any, valor_portal: Any) -> bool:
+    """Compara números de solicitação aceitando diferenças simples de formatação."""
+    numero_bd_normalizado = _normalizar_numero_solicitacao(valor_bd)
+    numero_portal_normalizado = _normalizar_numero_solicitacao(valor_portal)
+    comparacao = (
+        bool(numero_bd_normalizado) and
+        bool(numero_portal_normalizado) and
+        numero_bd_normalizado == numero_portal_normalizado
+    )
+    logging.debug(
+        "Comparando Nº Solicitação BD (%s -> %s) com Portal (%s -> %s): %s",
+        valor_bd,
+        numero_bd_normalizado,
+        valor_portal,
+        numero_portal_normalizado,
+        "Iguais" if comparacao else "Diferentes",
+    )
     return comparacao
 # --- Fim Funções Auxiliares ---
 
@@ -105,6 +143,9 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
     especificacao_capturada = None # Variável para guardar a especificação da lista
     status_portal_inicial = None # Variável para guardar o status da lista
     valor_portal_texto_capturado = None # Variável para guardar o valor da lista
+    candidatos_mesmo_numero = []
+    candidatos_mesmo_valor = []
+    amostra_linhas_tabela = []
 
     # --- CORREÇÃO DO BUG (UnboundLocalError) ---
     # Inicializa a variável aqui para garantir que ela exista no 'finally'
@@ -172,15 +213,33 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
                 if len(colunas) < 7: continue # Pula linhas incompletas
 
                 num_solicitacao_portal = colunas[1].inner_text(timeout=2000).strip()
+                especificacao_portal = colunas[3].inner_text(timeout=2000).strip()
+                status_portal_linha = colunas[4].inner_text(timeout=2000).strip()
                 valor_portal_texto = colunas[6].inner_text(timeout=2000).strip()
 
                 logging.debug(f"Linha lida: Nº Sol: {num_solicitacao_portal}, Valor: {valor_portal_texto}")
+                resumo_linha = {
+                    "numero_solicitacao": num_solicitacao_portal,
+                    "valor": valor_portal_texto,
+                    "status": status_portal_linha,
+                    "especificacao": especificacao_portal,
+                }
+                if len(amostra_linhas_tabela) < 5:
+                    amostra_linhas_tabela.append(resumo_linha)
+
+                numero_corresponde = _comparar_numero_solicitacao(num_solicitacao_bd, num_solicitacao_portal)
+                valor_corresponde = _comparar_valores(valor_bd, valor_portal_texto)
+
+                if numero_corresponde and not valor_corresponde and len(candidatos_mesmo_numero) < 3:
+                    candidatos_mesmo_numero.append(resumo_linha)
+                if valor_corresponde and not numero_corresponde and len(candidatos_mesmo_valor) < 3:
+                    candidatos_mesmo_valor.append(resumo_linha)
 
                 # Compara número da solicitação e valor (com tolerância)
-                if num_solicitacao_portal == num_solicitacao_bd and _comparar_valores(valor_bd, valor_portal_texto):
+                if numero_corresponde and valor_corresponde:
                     # Captura os dados ANTES de clicar em detalhes
-                    status_portal_inicial = colunas[4].inner_text(timeout=2000).strip()
-                    especificacao_capturada = colunas[3].inner_text(timeout=2000).strip() # Captura a especificação aqui
+                    status_portal_inicial = status_portal_linha
+                    especificacao_capturada = especificacao_portal # Captura a especificação aqui
                     valor_portal_texto_capturado = valor_portal_texto # Guarda o valor exato lido
 
                     logging.info(f"Custa correspondente (ID {solicitacao_id}) encontrada! Status Lista: '{status_portal_inicial}', Especificação: '{especificacao_capturada}'")
@@ -203,7 +262,17 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
                 continue # Tenta a próxima linha
 
         if not linha_alvo:
-            logging.warning(f"Nenhuma custa correspondente a Nº Sol '{num_solicitacao_bd}' e Valor '{valor_bd}' encontrada para NPJ {npj_para_buscar}.")
+            logging.warning(
+                "Nenhuma custa correspondente a Nº Sol '%s' (normalizado: '%s') e Valor '%s' encontrada para NPJ %s. "
+                "Candidatos com mesmo número: %s | Candidatos com mesmo valor: %s | Amostra da tabela: %s",
+                num_solicitacao_bd,
+                _normalizar_numero_solicitacao(num_solicitacao_bd),
+                valor_bd,
+                npj_para_buscar,
+                json.dumps(candidatos_mesmo_numero, ensure_ascii=False),
+                json.dumps(candidatos_mesmo_valor, ensure_ascii=False),
+                json.dumps(amostra_linhas_tabela, ensure_ascii=False),
+            )
             resultado_final["status_robo"] = "Erro: Custa específica não encontrada"
             return resultado_final
 
