@@ -1,6 +1,7 @@
 import os
 import logging
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 from dotenv import load_dotenv
 
 # --- Configuração de Logging Inicial ---
@@ -50,7 +51,32 @@ ONELOG_PASSWORD = os.getenv("ONELOG_PASSWORD", "senha_ad")
 DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT_MS", "60000")) 
 
 # URLs das APIs
-API_BASE_URL = os.getenv("API_BASE_URL", "http://onecost-backend:8000")
+def _normalize_internal_api_base_url(url: str) -> str:
+    """Migra automaticamente o hostname legado 'backend' para o serviço atual."""
+    normalized_url = (url or "http://onecost-backend:8000").rstrip("/")
+    try:
+        parsed = urlparse(normalized_url)
+        if parsed.hostname != "backend":
+            return normalized_url
+
+        host = "onecost-backend"
+        if parsed.port:
+            host = f"{host}:{parsed.port}"
+
+        return urlunparse(parsed._replace(netloc=host)).rstrip("/")
+    except Exception:
+        return normalized_url
+
+
+raw_api_base_url = os.getenv("API_BASE_URL", "http://onecost-backend:8000")
+API_BASE_URL = _normalize_internal_api_base_url(raw_api_base_url)
+if API_BASE_URL != raw_api_base_url.rstrip("/"):
+    log.warning(
+        "API_BASE_URL legado detectado (%s). Usando %s no lugar.",
+        raw_api_base_url,
+        API_BASE_URL,
+    )
+
 ONELOG_API_URL = os.getenv("ONELOG_API_URL", "http://api-onelog.mdradvocacia.com")
 
 # Tempo limite da sessão do portal em segundos
