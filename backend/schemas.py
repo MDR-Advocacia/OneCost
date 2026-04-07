@@ -119,12 +119,14 @@ class SolicitacaoCustaUpdate(BaseModel):
     status_robo: Optional[str] = None
     # --- NOVO CAMPO ---
     especificacao: Optional[str] = None # Adicionado para o robô enviar
+    data_solicitacao: Optional[date] = None
     prazo_fatal_em: Optional[datetime] = None
     proxima_verificacao_em: Optional[datetime] = None
     alerta_enviado_em: Optional[datetime] = None
     acao_apos_alerta: Optional[str] = None
     monitoramento_ativo: Optional[bool] = None
     motivo_encerramento: Optional[str] = None
+    aguardando_confirmacao: Optional[bool] = None
     # Recebe lista de strings ou None do robô/api
     comprovantes_path: Optional[List[str]] = None
     # Recebe float ou None, validado no endpoint

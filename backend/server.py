@@ -526,12 +526,56 @@ def create_solicitacao(
     current_user: models.User = Depends(get_current_active_user)
 ):
     """Cria uma nova solicitação de custa."""
-    log.info(f"[POST /solicitacoes/] Usuário '{current_user.username}' criando solicitação NPJ {solicitacao.npj}")
+    npj_normalizado = solicitacao.npj.strip()
+    numero_solicitacao_normalizado = solicitacao.numero_solicitacao.strip()
+    log.info(f"[POST /solicitacoes/] Usuário '{current_user.username}' criando solicitação NPJ {npj_normalizado}")
     try:
+        solicitacoes_existentes = db.query(models.SolicitacaoCusta).options(
+            selectinload(models.SolicitacaoCusta.usuario_criacao)
+        ).filter(
+            models.SolicitacaoCusta.npj == npj_normalizado,
+            models.SolicitacaoCusta.numero_solicitacao == numero_solicitacao_normalizado
+        ).order_by(models.SolicitacaoCusta.id.desc()).all()
+
+        if solicitacoes_existentes:
+            solicitacao_existente = solicitacoes_existentes[0]
+            pode_atualizar = current_user.role == 'admin' or solicitacao_existente.usuario_criacao_id == current_user.id
+            criado_por = solicitacao_existente.usuario_criacao.username if solicitacao_existente.usuario_criacao else None
+            log.warning(
+                f"[POST /solicitacoes/] Tentativa de criar duplicata para NPJ {npj_normalizado} / "
+                f"Solicitação {numero_solicitacao_normalizado}. Registro mais recente: ID {solicitacao_existente.id}."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "duplicate_solicitacao",
+                    "message": (
+                        f"Ja existe uma solicitacao com NPJ {npj_normalizado} e numero {numero_solicitacao_normalizado}. "
+                        "Atualize o registro existente em vez de criar outro."
+                    ),
+                    "existing_solicitacao": {
+                        "id": solicitacao_existente.id,
+                        "npj": solicitacao_existente.npj,
+                        "numero_solicitacao": solicitacao_existente.numero_solicitacao,
+                        "especificacao": solicitacao_existente.especificacao,
+                        "status_portal": solicitacao_existente.status_portal,
+                        "status_robo": solicitacao_existente.status_robo,
+                        "monitoramento_ativo": solicitacao_existente.monitoramento_ativo,
+                        "motivo_encerramento": solicitacao_existente.motivo_encerramento,
+                        "data_solicitacao": solicitacao_existente.data_solicitacao.isoformat() if solicitacao_existente.data_solicitacao else None,
+                        "valor": float(solicitacao_existente.valor) if solicitacao_existente.valor is not None else None,
+                        "usuario_criacao_id": solicitacao_existente.usuario_criacao_id,
+                        "criado_por": criado_por,
+                        "can_update": pode_atualizar,
+                        "duplicate_count": len(solicitacoes_existentes),
+                    }
+                }
+            )
+
         db_solicitacao = models.SolicitacaoCusta(
-            npj=solicitacao.npj,
+            npj=npj_normalizado,
             numero_processo=solicitacao.numero_processo,
-            numero_solicitacao=solicitacao.numero_solicitacao,
+            numero_solicitacao=numero_solicitacao_normalizado,
             especificacao=solicitacao.especificacao,
             status_portal=solicitacao.status_portal,
             prazo_fatal_em=solicitacao.prazo_fatal_em,
@@ -557,6 +601,9 @@ def create_solicitacao(
     except ValidationError as ve:
         log.error(f"[POST /solicitacoes/] Erro de validação: {ve}", exc_info=False)
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=ve.errors())
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         log.error(f"[POST /solicitacoes/] Erro interno: {e}", exc_info=True)
         db.rollback()
@@ -741,12 +788,10 @@ def update_solicitacao(
                 db_solicitacao.data_finalizacao = now_utc
                 updated = True
             elif solicitacao_update.finalizar is False and db_solicitacao.usuario_finalizacao_id is not None:
-                # Permitir "desfinalizar"? Por ora, não implementado, mas o log indica a tentativa.
-                log.warning(f"Usuário '{current_user.username}' tentou desmarcar finalização da ID {id} (ação não implementada).")
-                # Se fosse implementar:
-                # db_solicitacao.usuario_finalizacao_id = None
-                # db_solicitacao.data_finalizacao = None
-                # updated = True
+                log.info(f"Usuário '{current_user.username}' reabrindo solicitação ID {id} para novo acompanhamento.")
+                db_solicitacao.usuario_finalizacao_id = None
+                db_solicitacao.data_finalizacao = None
+                updated = True
 
         # Se houve alguma alteração, commita
         if updated:

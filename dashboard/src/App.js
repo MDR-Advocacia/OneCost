@@ -331,16 +331,48 @@ const parseSolicitacaoPaste = (text) => {
     };
 };
 
+const normalizeSolicitacaoKeyValue = (value) => String(value || '').trim();
+
+const findDuplicateSolicitacoes = (solicitacoes, npj, numeroSolicitacao) => {
+    const normalizedNpj = normalizeSolicitacaoKeyValue(npj);
+    const normalizedNumero = normalizeSolicitacaoKeyValue(numeroSolicitacao);
+
+    if (!normalizedNpj || !normalizedNumero) return [];
+
+    return (solicitacoes || [])
+        .filter((item) =>
+            normalizeSolicitacaoKeyValue(item?.npj) === normalizedNpj &&
+            normalizeSolicitacaoKeyValue(item?.numero_solicitacao) === normalizedNumero
+        )
+        .sort((a, b) => b.id - a.id);
+};
+
+const canCurrentUserUpdateSolicitacao = (solicitacao, currentUser) => {
+    if (!solicitacao || !currentUser) return false;
+    if (solicitacao.can_update === false) return false;
+    if (currentUser.role === 'admin') return true;
+
+    const creatorId = solicitacao.usuario_criacao_id ?? solicitacao.usuario_criacao?.id;
+    if (creatorId && currentUser.id) {
+        return creatorId === currentUser.id;
+    }
+
+    const creatorUsername = solicitacao.criado_por || solicitacao.usuario_criacao?.username;
+    return creatorUsername === currentUser.username;
+};
+
 // --- COMPONENTE DO FORMULÁRIO (SolicitacaoForm) ---
-const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
+const SolicitacaoForm = ({ onSolicitacaoCriada, existingSolicitacoes = [], currentUser }) => {
     const [linhaCopiada, setLinhaCopiada] = useState('');
     const [parsedSolicitacao, setParsedSolicitacao] = useState(null);
     const [prazoFatal, setPrazoFatal] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [success, setSuccess] = useState('');
+    const [serverDuplicateCandidate, setServerDuplicateCandidate] = useState(null);
 
     useEffect(() => {
+        setServerDuplicateCandidate(null);
         if (!linhaCopiada.trim()) {
             setParsedSolicitacao(null);
             setError('');
@@ -364,6 +396,23 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
             setError(err.message || 'Não foi possível interpretar a linha colada.');
         }
     }, [linhaCopiada]);
+
+    const duplicateMatches = useMemo(() => {
+        if (!parsedSolicitacao) return [];
+        return findDuplicateSolicitacoes(
+            existingSolicitacoes,
+            parsedSolicitacao.npj,
+            parsedSolicitacao.numeroSolicitacao
+        );
+    }, [existingSolicitacoes, parsedSolicitacao]);
+
+    const duplicateCandidate = serverDuplicateCandidate || duplicateMatches[0] || null;
+    const duplicateCount = duplicateCandidate?.duplicate_count || duplicateMatches.length;
+    const canUpdateDuplicate = duplicateCandidate
+        ? canCurrentUserUpdateSolicitacao(duplicateCandidate, currentUser)
+        : false;
+    const duplicateCreatorName = duplicateCandidate?.criado_por || duplicateCandidate?.usuario_criacao?.username || 'outro usuário';
+    const duplicateNeedsAdjustmentFlow = String(duplicateCandidate?.status_portal || '').toLowerCase().includes('devolvido');
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -395,30 +444,87 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
         }
 
         try {
-            const dados = {
+            const prazoFatalIso = toFortalezaIsoString(prazoFatal);
+            const dadosCriacao = {
                 npj: parsedSolicitacao.npj.trim(),
                 numero_processo: parsedSolicitacao.numeroProcesso?.trim() || null,
                 numero_solicitacao: parsedSolicitacao.numeroSolicitacao.trim(),
                 especificacao: parsedSolicitacao.especificacao?.trim() || null,
                 status_portal: parsedSolicitacao.statusPortal?.trim() || null,
-                prazo_fatal_em: toFortalezaIsoString(prazoFatal),
                 monitoramento_ativo: true,
                 valor: valorFloat,
                 data_solicitacao: parsedSolicitacao.dataSolicitacao,
                 aguardando_confirmacao: parsedSolicitacao.aguardandoConfirmacao
             };
-            await createSolicitacao(dados);
-            setSuccess('Solicitação criada com sucesso!');
+            if (prazoFatalIso) {
+                dadosCriacao.prazo_fatal_em = prazoFatalIso;
+            }
+
+            if (duplicateCandidate) {
+                if (!canUpdateDuplicate) {
+                    setError(`Já existe uma solicitação com esse NPJ e número criada por ${duplicateCreatorName}. Peça ao responsável ou a um administrador para atualizar o registro existente.`);
+                    setIsLoading(false);
+                    return;
+                }
+
+                const dadosAtualizacao = {
+                    status_robo: 'Pendente',
+                    monitoramento_ativo: true,
+                    motivo_encerramento: null,
+                    proxima_verificacao_em: null,
+                    alerta_enviado_em: null,
+                    usuario_confirmacao_id: null,
+                    comprovantes_path: [],
+                    valor: valorFloat,
+                    data_solicitacao: parsedSolicitacao.dataSolicitacao,
+                    aguardando_confirmacao: parsedSolicitacao.aguardandoConfirmacao,
+                    finalizar: false
+                };
+
+                if (parsedSolicitacao.numeroProcesso?.trim()) {
+                    dadosAtualizacao.numero_processo = parsedSolicitacao.numeroProcesso.trim();
+                }
+                if (parsedSolicitacao.especificacao?.trim()) {
+                    dadosAtualizacao.especificacao = parsedSolicitacao.especificacao.trim();
+                }
+                if (parsedSolicitacao.statusPortal?.trim()) {
+                    dadosAtualizacao.status_portal = parsedSolicitacao.statusPortal.trim();
+                }
+                if (prazoFatalIso) {
+                    dadosAtualizacao.prazo_fatal_em = prazoFatalIso;
+                }
+
+                await updateSolicitacao(duplicateCandidate.id, dadosAtualizacao);
+                setSuccess(
+                    duplicateCount > 1
+                        ? `Solicitação existente atualizada (ID ${duplicateCandidate.id}). Ainda existem ${duplicateCount - 1} registro(s) antigo(s) com essa mesma chave para revisar.`
+                        : `Solicitação existente atualizada com sucesso (ID ${duplicateCandidate.id}).`
+                );
+            } else {
+                await createSolicitacao(dadosCriacao);
+                setSuccess('Solicitação criada com sucesso!');
+            }
+
             setLinhaCopiada('');
             setParsedSolicitacao(null);
             setPrazoFatal('');
+            setServerDuplicateCandidate(null);
             setTimeout(() => setSuccess(''), 3000);
             if(onSolicitacaoCriada) onSolicitacaoCriada();
         } catch (err) {
              const detail = err.response?.data?.detail;
+             if (err.response?.status === 409 && detail?.code === 'duplicate_solicitacao') {
+                 if (detail.existing_solicitacao) {
+                     setServerDuplicateCandidate(detail.existing_solicitacao);
+                 }
+                 setError(detail.message || 'Já existe uma solicitação com esse NPJ e número. Revise e confirme a atualização do registro existente.');
+                 return;
+             }
              let message = 'Erro ao criar solicitação.';
              if (typeof detail === 'string') {
                  message += ` ${detail}`;
+             } else if (detail && typeof detail === 'object' && detail.message) {
+                 message += ` ${detail.message}`;
              } else if (Array.isArray(detail)) {
                  // Formata erros de validação do Pydantic/FastAPI
                  message += ` ${detail.map(d => `${d.loc?.join('/') || 'campo'}: ${d.msg}`).join('; ')}`;
@@ -495,6 +601,23 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
                     </p>
                 </div>
             )}
+            {duplicateCandidate && (
+                <div className={`recognized-line duplicate-warning-card ${canUpdateDuplicate ? 'is-warning' : 'is-blocked'}`}>
+                    <p className="recognized-line-title">
+                        {canUpdateDuplicate ? 'Solicitação já cadastrada' : 'Solicitação bloqueada por duplicidade'}
+                    </p>
+                    <p className="recognized-line-text">
+                        Já existe
+                        {duplicateCount > 1 ? `m ${duplicateCount} registros` : ' um registro'}
+                        {' '}com esse NPJ e número de solicitação.
+                        {canUpdateDuplicate
+                            ? ` Ao confirmar, vamos atualizar o registro mais recente (ID ${duplicateCandidate.id}) em vez de criar outro.`
+                            : ` O registro mais recente é o ID ${duplicateCandidate.id}, criado por ${duplicateCreatorName}.`}
+                        {duplicateCandidate.status_portal && ` Último status do banco: ${duplicateCandidate.status_portal}.`}
+                        {duplicateNeedsAdjustmentFlow && ' Use esta atualização depois de corrigir e reenviar a solicitação no portal do banco.'}
+                    </p>
+                </div>
+            )}
             <div className="deadline-config-grid">
                 <div className="form-group">
                     <label htmlFor="prazoFatal">Prazo fatal para comprovante</label>
@@ -509,8 +632,16 @@ const SolicitacaoForm = ({ onSolicitacaoCriada }) => {
                 </div>
             </div>
             <div className="submit-row">
-                <button type="submit" disabled={isLoading || !parsedSolicitacao} className="button primary confirm-submit-button">
-                    {isLoading ? 'Enviando...' : 'Confirmar e Enviar Solicitação'}
+                <button
+                    type="submit"
+                    disabled={isLoading || !parsedSolicitacao || (duplicateCandidate && !canUpdateDuplicate)}
+                    className={`button ${duplicateCandidate ? 'warning' : 'primary'} confirm-submit-button`}
+                >
+                    {isLoading
+                        ? 'Enviando...'
+                        : duplicateCandidate
+                            ? `Atualizar solicitação existente${duplicateCandidate.id ? ` (ID ${duplicateCandidate.id})` : ''}`
+                            : 'Confirmar e Enviar Solicitação'}
                 </button>
             </div>
             {(error || success) && (
@@ -2048,7 +2179,11 @@ function App() {
 
                 {/* Formulário de Criação de Solicitação */}
                 {/* Passa a função para recarregar usando os filtros atuais */}
-                <SolicitacaoForm onSolicitacaoCriada={() => handleFiltersChange(filters.includeArchived, filters.userFilter)} />
+                <SolicitacaoForm
+                    onSolicitacaoCriada={() => handleFiltersChange(filters.includeArchived, filters.userFilter)}
+                    existingSolicitacoes={solicitacoes}
+                    currentUser={currentUser}
+                />
 
                  {/* <<< NOVO: Filtro de Usuário >>> */}
                  <div className="card filter-container filter-container-compact">
