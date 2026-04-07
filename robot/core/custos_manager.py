@@ -89,6 +89,77 @@ def _comparar_numero_solicitacao(valor_bd: Any, valor_portal: Any) -> bool:
         "Iguais" if comparacao else "Diferentes",
     )
     return comparacao
+
+
+def _obter_painel_resultados(page: Page):
+    """Retorna o painel visível da listagem de custas sem depender de estilos inline frágeis."""
+    return page.locator("div.tabs__pane.is-visible").first
+
+
+def _detectar_erro_portal_na_pagina(page: Page) -> Optional[str]:
+    """Extrai a mensagem de erro exibida pelo portal, quando houver."""
+    try:
+        corpo = page.locator("body").inner_text(timeout=2000)
+    except Exception:
+        return None
+
+    for linha in corpo.splitlines():
+        linha_limpa = linha.strip()
+        if linha_limpa.lower().startswith("erro:"):
+            return linha_limpa
+    return None
+
+
+def _normalizar_mensagem_erro_portal(valor: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", str(valor or "").strip().lower())
+
+
+def _extrair_tentativa_erro_portal_anterior(solicitacao_info: Dict[str, Any], erro_portal: Optional[str]) -> int:
+    motivo_anterior = str(solicitacao_info.get("motivo_encerramento") or "")
+    status_anterior = str(solicitacao_info.get("status_robo") or "")
+    erro_normalizado = _normalizar_mensagem_erro_portal(erro_portal)
+
+    if "erro portal na busca" not in motivo_anterior.lower() and "erro portal na busca" not in status_anterior.lower():
+        return 0
+
+    if erro_normalizado and erro_normalizado not in _normalizar_mensagem_erro_portal(motivo_anterior):
+        return 0
+
+    match = re.search(r"tentativa\s+(\d+)\s*/\s*3", motivo_anterior, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+
+    return 1
+
+
+def _registrar_erro_portal_na_busca(
+    resultado_final: Dict[str, Any],
+    solicitacao_info: Dict[str, Any],
+    erro_portal: str,
+) -> None:
+    tentativa_atual = min(_extrair_tentativa_erro_portal_anterior(solicitacao_info, erro_portal) + 1, 3)
+    motivo = f"Erro portal na busca (tentativa {tentativa_atual}/3): {erro_portal}"
+
+    if tentativa_atual >= 3:
+        resultado_final["status_robo"] = "Alerta: Ação do usuário necessária (Erro no portal)"
+        resultado_final["monitoramento_ativo"] = False
+        resultado_final["motivo_encerramento"] = motivo
+        logging.error(
+            "Portal falhou 3 vezes ao buscar a solicitação ID %s. Encaminhando para inspeção manual. Erro: %s",
+            solicitacao_info.get("id"),
+            erro_portal,
+        )
+        return
+
+    resultado_final["status_robo"] = "Pendente"
+    resultado_final["monitoramento_ativo"] = True
+    resultado_final["motivo_encerramento"] = motivo
+    logging.warning(
+        "Erro do portal ao buscar a solicitação ID %s (tentativa %s/3). A solicitação voltará para nova tentativa. Erro: %s",
+        solicitacao_info.get("id"),
+        tentativa_atual,
+        erro_portal,
+    )
 # --- Fim Funções Auxiliares ---
 
 
@@ -187,15 +258,25 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
 
         logging.info("Aguardando tabela de resultados carregar...")
         try:
-            container_scroll = page.locator("div.tabs__pane.is-visible div[style*='overflow-y: auto']")
+            container_scroll = _obter_painel_resultados(page)
             expect(container_scroll).to_be_visible(timeout=30000)
             # Espera pela primeira linha de dados na tabela
             container_scroll.locator("tr[ng-repeat='item in $data']").first.wait_for(timeout=60000)
             logging.info("Tabela de resultados carregada.")
             page.wait_for_timeout(1500) # Pausa extra para garantir renderização
-        except PlaywrightTimeoutError:
-            logging.warning(f"Tabela de custos não apareceu após preencher o NPJ {npj_para_buscar}.")
-            resultado_final["status_robo"] = "Erro: Tabela de custos não encontrada"
+        except (PlaywrightTimeoutError, AssertionError):
+            erro_portal = _detectar_erro_portal_na_pagina(page)
+            if erro_portal:
+                logging.error(
+                    "Portal retornou erro ao buscar NPJ %s para a solicitação ID %s: %s",
+                    npj_para_buscar,
+                    solicitacao_id,
+                    erro_portal,
+                )
+                _registrar_erro_portal_na_busca(resultado_final, solicitacao_info, erro_portal)
+            else:
+                logging.warning(f"Tabela de custos não apareceu após preencher o NPJ {npj_para_buscar}.")
+                resultado_final["status_robo"] = "Erro: Tabela de custos não encontrada"
             return resultado_final
 
         # 3. Encontrar a Custa Específica na Tabela e CAPTURAR DADOS INICIAIS
@@ -486,7 +567,7 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
                 voltar_para_lista_necessario = False # Já voltamos, não precisa voltar de novo no finally
 
                 # Reencontrar a linha na lista atualizada
-                container_scroll_confirm = page.locator("div.tabs__pane.is-visible div[style*='overflow-y: auto']")
+                container_scroll_confirm = _obter_painel_resultados(page)
                 expect(container_scroll_confirm).to_be_visible(timeout=30000)
                 # Espera a primeira linha carregar após a atualização
                 container_scroll_confirm.locator("tr[ng-repeat='item in $data']").first.wait_for(timeout=60000)
@@ -581,7 +662,7 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
                         logging.info(f"NPJ {npj_para_buscar} preenchido novamente para double-check.")
 
                         # Aguarda a tabela recarregar
-                        container_scroll_check = page.locator("div.tabs__pane.is-visible div[style*='overflow-y: auto']")
+                        container_scroll_check = _obter_painel_resultados(page)
                         expect(container_scroll_check).to_be_visible(timeout=30000)
                         container_scroll_check.locator("tr[ng-repeat='item in $data']").first.wait_for(timeout=60000)
                         logging.info("Tabela recarregada para double-check. Procurando a solicitação...")
