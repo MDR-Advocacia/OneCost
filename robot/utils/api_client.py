@@ -8,11 +8,12 @@ from decimal import Decimal # Para tratar o valor corretamente no payload
 # Importar configs
 try:
     # Tenta importar ROBOT_USERNAME também, para log de erro 403
-    from config import API_BASE_URL, ROBOT_USERNAME
+    from config import API_BASE_URL, ROBOT_USERNAME, ROBOT_PASSWORD
 except ImportError:
     # Fallback se executado de forma isolada
     API_BASE_URL = os.getenv("API_BASE_URL", "http://onecost-backend:8000")
     ROBOT_USERNAME = "robô_desconhecido" # Define um fallback
+    ROBOT_PASSWORD = os.getenv("ROBOT_PASSWORD", "default_password")
 
 
 log = logging.getLogger(__name__) # Logger específico
@@ -20,6 +21,8 @@ log = logging.getLogger(__name__) # Logger específico
 # Variáveis globais para armazenar o token JWT e o ID do usuário robô
 _api_token: Optional[str] = None
 _robot_user_id: Optional[int] = None
+_robot_login_username: Optional[str] = ROBOT_USERNAME
+_robot_login_password: Optional[str] = ROBOT_PASSWORD
 
 # --- Funções Auxiliares ---
 
@@ -29,6 +32,40 @@ def _get_auth_headers() -> Dict[str, str]:
     if _api_token:
         headers['Authorization'] = f'Bearer {_api_token}'
     return headers
+
+
+def _build_headers(extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Monta headers preservando content-type e atualizando o bearer token atual."""
+    headers = _get_auth_headers()
+    if extra_headers:
+        headers.update(extra_headers)
+    return headers
+
+
+def _reauthenticate_robot() -> bool:
+    """Tenta renovar o token do robô usando as credenciais já conhecidas."""
+    if not _robot_login_username or _robot_login_password is None:
+        log.error("Não é possível reautenticar o robô: credenciais não disponíveis.")
+        return False
+
+    log.warning("Token da API expirado ou rejeitado. Tentando novo login do robô...")
+    return robot_login(_robot_login_username, _robot_login_password)
+
+
+def _request_with_reauth(method: str, url: str, *, retry_on_401: bool = True, **kwargs) -> requests.Response:
+    """Executa requisições autenticadas e refaz login uma vez em caso de 401."""
+    response = requests.request(method, url, **kwargs)
+
+    if response.status_code != 401 or not retry_on_401:
+        return response
+
+    log.warning("API retornou 401 em %s %s. Renovando token e repetindo a requisição...", method.upper(), url)
+    if not _reauthenticate_robot():
+        return response
+
+    retry_kwargs = dict(kwargs)
+    retry_kwargs['headers'] = _build_headers(kwargs.get('headers'))
+    return requests.request(method, url, **retry_kwargs)
 
 def _fetch_robot_user_id() -> Optional[int]:
     """Busca o ID do usuário robô logado usando o endpoint /users/me."""
@@ -69,9 +106,11 @@ def _fetch_robot_user_id() -> Optional[int]:
 
 def robot_login(username: str, password: str) -> bool:
     """Faz login na API, armazena o token e busca o ID do usuário robô."""
-    global _api_token, _robot_user_id
+    global _api_token, _robot_user_id, _robot_login_username, _robot_login_password
     _api_token = None # Limpa token antigo
     _robot_user_id = None # Limpa ID antigo
+    _robot_login_username = username
+    _robot_login_password = password
     login_url = f"{API_BASE_URL}/login"
     payload = {'username': username, 'password': password}
     log.info(f"Tentando login na API como usuário '{username}' em {login_url}...")
@@ -110,7 +149,7 @@ def robot_login(username: str, password: str) -> bool:
 def resetar_solicitacoes_com_erro() -> bool:
     """Chama o endpoint para resetar solicitações com erro para Pendente."""
     reset_url = f"{API_BASE_URL}/solicitacoes/resetar-erros"
-    headers = _get_auth_headers()
+    headers = _build_headers()
     if not _api_token:
         log.error("Não é possível resetar erros: Robô não autenticado (token ausente).")
         return False
@@ -118,7 +157,7 @@ def resetar_solicitacoes_com_erro() -> bool:
     log.info(f"Chamando endpoint para resetar solicitações com erro em {reset_url}...")
     try:
         # Método POST sem corpo (body) é comum para ações
-        response = requests.post(reset_url, headers=headers, timeout=15) # Timeout um pouco maior
+        response = _request_with_reauth("post", reset_url, headers=headers, timeout=15) # Timeout um pouco maior
         response.raise_for_status()
         log.info(f"Resposta do reset de erros: {response.json().get('message', 'Status OK')}")
         return True
@@ -145,14 +184,14 @@ def get_proxima_solicitacao_pendente() -> Optional[Dict[str, Any]]:
     """Busca a próxima solicitação (limit 1) com status 'Pendente'."""
     get_url = f"{API_BASE_URL}/solicitacoes/"
     params = {"status_robo": "Pendente", "limit": 1} # Busca apenas uma pendente
-    headers = _get_auth_headers()
+    headers = _build_headers()
     if not _api_token:
         log.error("Não é possível buscar solicitações: Robô não autenticado (token ausente).")
         return None
 
     log.info(f"Buscando próxima solicitação pendente em {get_url}...")
     try:
-        response = requests.get(get_url, params=params, headers=headers, timeout=10)
+        response = _request_with_reauth("get", get_url, params=params, headers=headers, timeout=10)
         response.raise_for_status()
         solicitacoes = response.json()
         if solicitacoes:
@@ -184,14 +223,14 @@ def get_todas_solicitacoes_pendentes() -> List[Dict[str, Any]]:
     """Busca TODAS as solicitações com status 'Pendente'."""
     get_url = f"{API_BASE_URL}/solicitacoes/"
     params = {"status_robo": "Pendente"}
-    headers = _get_auth_headers()
+    headers = _build_headers()
     if not _api_token:
         log.error("Não é possível buscar solicitações: Robô não autenticado (token ausente).")
         return []
 
     log.info(f"Buscando TODAS as solicitações pendentes em {get_url}...")
     try:
-        response = requests.get(get_url, params=params, headers=headers, timeout=20) # Timeout maior
+        response = _request_with_reauth("get", get_url, params=params, headers=headers, timeout=20) # Timeout maior
         response.raise_for_status()
         solicitacoes = response.json()
         if solicitacoes and isinstance(solicitacoes, list):
@@ -218,7 +257,7 @@ def get_todas_solicitacoes_pendentes() -> List[Dict[str, Any]]:
 def update_solicitacao_na_api(solicitacao_id: int, payload_original: Dict[str, Any]) -> bool:
     """Atualiza uma solicitação específica na API, enviando os campos corretos."""
     update_url = f"{API_BASE_URL}/solicitacoes/{solicitacao_id}"
-    headers = _get_auth_headers()
+    headers = _build_headers()
     if not _api_token:
         log.error(f"Não é possível atualizar solicitação ID {solicitacao_id}: Robô não autenticado.")
         return False
@@ -301,7 +340,7 @@ def update_solicitacao_na_api(solicitacao_id: int, payload_original: Dict[str, A
 
     log.info(f"Enviando atualização JSON para API (ID {solicitacao_id}): {json.dumps(payload_limpo_final, default=str)}")
     try:
-        response = requests.put(update_url, headers=headers, json=payload_limpo_final, timeout=15)
+        response = _request_with_reauth("put", update_url, headers=headers, json=payload_limpo_final, timeout=15)
         response.raise_for_status() # Verifica erro HTTP
         log.info(f"Solicitação ID {solicitacao_id} atualizada com sucesso na API.")
         return True
