@@ -10,6 +10,7 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, ex
 
 # Importar constantes do config
 from config import COMPROVANTES_DIR, DOWNLOAD_TIMEOUT
+from core.session_manager import SessionExpiredError
 # Importar o ID do usuário robô (preenchido após o login)
 from utils.api_client import _robot_user_id
 
@@ -160,6 +161,31 @@ def _registrar_erro_portal_na_busca(
         tentativa_atual,
         erro_portal,
     )
+
+
+def _erro_portal_indica_sessao_expirada(erro_portal: Optional[str]) -> bool:
+    erro = _normalizar_mensagem_erro_portal(erro_portal)
+    sinais = [
+        "/paj/resources/app/portal/cadastro/processo/pesquisa-avancada/numero-npj/",
+        "/portal/cadastro/processo/pesquisa-avancada/numero-npj/",
+        "erro: -1",
+    ]
+    return any(sinal in erro for sinal in sinais)
+
+
+def _pagina_indica_login_bb(page: Page) -> bool:
+    verificacoes = [
+        "text=/Bem-vindo à Intranet BB/i",
+        "text=/Código do Usuário/i",
+        "button:has-text('AUTENTICAR')",
+    ]
+    for seletor in verificacoes:
+        try:
+            if page.locator(seletor).is_visible(timeout=750):
+                return True
+        except Exception:
+            pass
+    return False
 # --- Fim Funções Auxiliares ---
 
 
@@ -205,6 +231,9 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
 
     logging.info(f"Iniciando processamento para Solicitação ID: {solicitacao_id}, NPJ: {npj_para_buscar}")
 
+    if _pagina_indica_login_bb(page):
+        raise SessionExpiredError("Tela de login do BB detectada antes de iniciar o processamento da custa.")
+
     if not npj_para_buscar:
         logging.error(f"NPJ não fornecido para busca na solicitação ID {solicitacao_id}.")
         resultado_final["status_robo"] = "Erro: NPJ não fornecido"
@@ -243,6 +272,8 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
                 input_npj_placeholder.clear()
                 logging.info("Campo NPJ limpo diretamente.")
             except Exception as e_clear_input:
+                if _pagina_indica_login_bb(page):
+                    raise SessionExpiredError("Tela de login do BB detectada ao preparar o formulário de busca.") from e_clear_input
                 logging.error(f"Falha ao tentar limpar o campo NPJ diretamente: {e_clear_input}")
                 # Considerar lançar erro aqui se a limpeza for crítica
         except Exception as e_clear:
@@ -250,7 +281,12 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
 
         # 2. Preencher NPJ e Aguardar Tabela
         input_npj = page.locator("#npj")
-        expect(input_npj).to_be_visible(timeout=15000)
+        try:
+            expect(input_npj).to_be_visible(timeout=15000)
+        except AssertionError as e_input:
+            if _pagina_indica_login_bb(page):
+                raise SessionExpiredError("Tela de login do BB detectada ao localizar o campo NPJ.") from e_input
+            raise
         logging.info(f"Preenchendo NPJ: {npj_para_buscar}")
         input_npj.fill(npj_para_buscar)
         input_npj.press("Tab") # Ajuda a disparar eventos
@@ -266,6 +302,10 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
             page.wait_for_timeout(1500) # Pausa extra para garantir renderização
         except (PlaywrightTimeoutError, AssertionError):
             erro_portal = _detectar_erro_portal_na_pagina(page)
+            if _pagina_indica_login_bb(page):
+                raise SessionExpiredError("Tela de login do BB detectada após a busca por NPJ.")
+            if erro_portal and _erro_portal_indica_sessao_expirada(erro_portal):
+                raise SessionExpiredError(f"Portal retornou erro típico de sessão expirada: {erro_portal}")
             if erro_portal:
                 logging.error(
                     "Portal retornou erro ao buscar NPJ %s para a solicitação ID %s: %s",
@@ -767,6 +807,9 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
              resultado_final["comprovantes_path"] = [screenshot_relativo.as_posix()]
         except Exception as e_screen: logging.error(f"Falha ao salvar screenshot de erro de timeout: {e_screen}")
         voltar_para_lista_necessario = False # Timeout, provavelmente não está na tela certa para voltar
+
+    except SessionExpiredError:
+        raise
 
     except Exception as e:
         logging.exception(f"Erro crítico inesperado durante processamento da ID {solicitacao_id}") # Loga stacktrace completo

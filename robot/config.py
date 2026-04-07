@@ -81,3 +81,5 @@ ONELOG_API_URL = os.getenv("ONELOG_API_URL", "http://api-onelog.mdradvocacia.com
 
 # Tempo limite da sessão do portal em segundos
 SESSION_TIMEOUT_SECONDS = int(os.getenv("SESSION_TIMEOUT_SECONDS", "1800"))
+# Janela preventiva para reciclar cookies/contexto antes da expiração habitual (~30 min)
+SESSION_RENEW_BEFORE_SECONDS = int(os.getenv("SESSION_RENEW_BEFORE_SECONDS", "1320"))

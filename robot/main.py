@@ -25,7 +25,7 @@ try:
     # Importações de configuração
     from config import (
         URL_PORTAL_CUSTAS, LOG_DIR, ROBOT_USERNAME, ROBOT_PASSWORD,
-        SESSION_TIMEOUT_SECONDS
+        SESSION_TIMEOUT_SECONDS, SESSION_RENEW_BEFORE_SECONDS
     )
     # Importações dos módulos core
     from core.browser_manager import realizar_login_automatico
@@ -209,7 +209,14 @@ def main():
                 try:
                     # Verifica se a sessão do portal expirou e tenta renovar se necessário
                     page, browser, context, browser_process_ref, session_start_time = refresh_session_if_needed(
-                        playwright, page, browser, context, browser_process_ref, session_start_time, SESSION_TIMEOUT_SECONDS
+                        playwright,
+                        page,
+                        browser,
+                        context,
+                        browser_process_ref,
+                        session_start_time,
+                        SESSION_TIMEOUT_SECONDS,
+                        SESSION_RENEW_BEFORE_SECONDS,
                     )
                 except SessionExpiredError as e_sess:
                      # Se a renovação falhar, é um erro crítico para o ciclo atual
@@ -264,12 +271,22 @@ def main():
                     else:
                         processed_count += 1  # Incrementa contador de sucesso
 
-                except (PlaywrightError, SessionExpiredError) as e:
-                    # Erros específicos do Playwright ou de sessão durante o processamento
-                    log.critical(f"Erro (Playwright/Sessão) ao processar ID {solicitacao_id}: {e}", exc_info=False)
+                except SessionExpiredError as e:
+                    log.warning(f"Sessão do portal expirada ao processar ID {solicitacao_id}: {e}")
+                    log.debug("Stack trace completo da expiração de sessão:", exc_info=True)
+                    if not resultado_processamento:
+                         resultado_processamento = {
+                             "solicitacao_id": solicitacao_id,
+                             "status_robo": "Pendente",
+                             "monitoramento_ativo": True,
+                             "motivo_encerramento": "Sessão do portal expirada; nova tentativa agendada",
+                         }
+                    session_start_time = 0  # Força a renovação da sessão na próxima iteração
+                except PlaywrightError as e:
+                    # Erros específicos do Playwright durante o processamento
+                    log.critical(f"Erro Playwright ao processar ID {solicitacao_id}: {e}", exc_info=False)
                     log.debug("Stack trace completo do erro:", exc_info=True)  # Log detalhado no modo debug
                     general_exit_code = 1
-                    # Garante que haja um resultado para enviar à API, marcando como erro
                     if not resultado_processamento:
                          resultado_processamento = {"solicitacao_id": solicitacao_id, "status_robo": f"Erro Processamento: {type(e).__name__}"}
                     session_start_time = 0  # Força a verificação/renovação da sessão na próxima iteração
