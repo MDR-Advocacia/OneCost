@@ -34,14 +34,56 @@ const EditIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="icon
 // --- Funções Auxiliares ---
 const APP_TIME_ZONE = 'America/Fortaleza';
 
+const parseAppDate = (rawValue) => {
+    if (!rawValue) return null;
+
+    if (rawValue instanceof Date) {
+        return Number.isNaN(rawValue.getTime()) ? null : rawValue;
+    }
+
+    const value = String(rawValue).trim();
+    if (!value) return null;
+
+    const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnlyMatch) {
+        const [, year, month, day] = dateOnlyMatch;
+        return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+    }
+
+    const naiveDateTimeMatch = value.match(
+        /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?$/
+    );
+    if (naiveDateTimeMatch) {
+        const [, year, month, day, hour, minute, second = '0', fractional = '0'] = naiveDateTimeMatch;
+        const milliseconds = Number((fractional + '000').slice(0, 3));
+        return new Date(
+            Date.UTC(
+                Number(year),
+                Number(month) - 1,
+                Number(day),
+                Number(hour),
+                Number(minute),
+                Number(second),
+                milliseconds
+            )
+        );
+    }
+
+    const normalizedValue = value.includes(' ') && !value.includes('T')
+        ? value.replace(' ', 'T')
+        : value;
+    const parsed = new Date(normalizedValue);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
 const formatDataHora = (dataString) => {
     if (!dataString) return 'N/A';
     try {
-        // Tenta criar Data assumindo UTC se 'Z' ou offset estiver presente, senão local
-        const data = new Date(dataString.endsWith('Z') || dataString.includes('+') || dataString.includes('T') ? dataString : dataString + 'Z');
-        if (isNaN(data.getTime())) {
+        const data = parseAppDate(dataString);
+        const rawText = String(dataString);
+        if (!data) {
             // Fallback para strings de data simples (YYYY-MM-DD) interpretando como UTC
-            const parts = dataString.split('-');
+            const parts = rawText.split('-');
             if (parts.length === 3) {
                  const dataOnly = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
                  if (!isNaN(dataOnly.getTime())) {
@@ -53,7 +95,7 @@ const formatDataHora = (dataString) => {
             return dataString; // Retorna original se não conseguir formatar
         }
         // Verifica se a string original parece ter hora
-        if (dataString.includes('T') || dataString.includes(' ')) {
+        if (rawText.includes('T') || rawText.includes(' ')) {
              // Para data/hora completas, fixa o timezone do produto em GMT-3
             return data.toLocaleString('pt-BR', {
                 timeZone: APP_TIME_ZONE,
@@ -67,6 +109,25 @@ const formatDataHora = (dataString) => {
          console.error("Erro formatando data:", dataString, e);
         return dataString; // Retorna original em caso de erro
     }
+};
+
+const parseComprovantesPaths = (paths) => {
+    try {
+        if (!paths) return [];
+        if (Array.isArray(paths)) {
+            return paths.map(String).filter((path) => path);
+        }
+        if (typeof paths === 'string' && paths.startsWith('[')) {
+            const parsed = JSON.parse(paths);
+            return Array.isArray(parsed) ? parsed.map(String).filter((path) => path) : [];
+        }
+        if (typeof paths === 'string' && paths.trim() !== '') {
+            return [paths];
+        }
+    } catch (error) {
+        console.error('Erro ao parsear comprovantes_path:', paths, error);
+    }
+    return [];
 };
 
 const formatValorDisplay = (valor) => {
@@ -258,7 +319,7 @@ const getPortalStatusClass = (statusPortal) => {
 const getPrazoFatalState = (prazoFatalEm, statusRobo) => {
     if (!prazoFatalEm) return 'none';
 
-    const prazoDate = new Date(prazoFatalEm);
+    const prazoDate = parseAppDate(prazoFatalEm);
     if (Number.isNaN(prazoDate.getTime())) return 'none';
 
     const robotStatus = String(statusRobo || '').toLowerCase();
@@ -1419,14 +1480,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
 
     // Função para formatar lista de comprovantes/documentos
     const formatComprovantes = (paths) => {
-        if (!paths || paths.length === 0) return <li className="modal-no-files">Nenhum</li>;
-        let links = [];
-        try {
-            if (Array.isArray(paths)) { links = paths.map(String).filter(p => p); } // Garante array de strings e remove vazios/null
-            else if (typeof paths === 'string' && paths.startsWith('[')) { links = JSON.parse(paths).map(String).filter(p => p); }
-            else if (typeof paths === 'string' && paths.trim() !== '') { links = [paths]; }
-        } catch (e) { console.error("Erro ao parsear comprovantes_path:", paths, e); return <li>Erro ao ler caminhos</li>; }
-
+        const links = parseComprovantesPaths(paths);
         if (!Array.isArray(links) || links.length === 0) return <li className="modal-no-files">Nenhum</li>;
 
         return links.map((link, index) => {
@@ -1463,17 +1517,15 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
         setIsMenuOpen(false); // Fecha menu
         console.log(`[SolicitacoesTable] Resetando solicitação ID ${selectedSolicitacao.id} para Pendente...`);
         try {
-            // Limpa especificacao também ao resetar
             await updateSolicitacao(selectedSolicitacao.id, {
                 status_robo: "Pendente",
-                status_portal: null, // Limpa status do portal
-                ultima_verificacao_robo: null, // Limpa última verificação
-                usuario_confirmacao_id: null, // Limpa confirmação se houve
-                especificacao: null, // Limpa especificacao
+                status_portal: null,
+                usuario_confirmacao_id: null,
                 proxima_verificacao_em: null,
                 alerta_enviado_em: null,
                 motivo_encerramento: null,
-                monitoramento_ativo: true
+                monitoramento_ativo: true,
+                finalizar: false
             });
             triggerRefresh(); // Atualiza a lista com filtros atuais
             closeModal();
@@ -1527,6 +1579,41 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
         selectedSolicitacao?.is_archived,
         Boolean(selectedSolicitacao?.usuario_finalizacao_id)
     );
+    const selectedStatusContext = [
+        selectedSolicitacao?.status_portal,
+        selectedSolicitacao?.status_robo,
+        selectedSolicitacao?.motivo_encerramento
+    ].join(' ').toLowerCase();
+    const selectedComprovantes = parseComprovantesPaths(selectedSolicitacao?.comprovantes_path);
+    const canReturnToMonitoring = Boolean(
+        selectedSolicitacao &&
+        !selectedSolicitacao.is_archived &&
+        selectedStatusContext.includes('devolvido para ajustes')
+    );
+    const canFinalizeWithDocuments = Boolean(
+        selectedSolicitacao &&
+        !selectedSolicitacao.is_archived &&
+        !selectedSolicitacao.usuario_finalizacao_id &&
+        selectedComprovantes.length > 0 &&
+        (
+            selectedStatusContext.includes('efetivad') ||
+            selectedStatusContext.includes('liquid') ||
+            selectedStatusContext.includes('finalizado com sucesso')
+        )
+    );
+    const modalActionHint = canReturnToMonitoring
+        ? {
+            tone: 'warning',
+            title: 'Depois de corrigir no portal',
+            text: 'Após ajustar e reenviar esta solicitação no portal do banco, clique em Retornar ao monitoramento para o robô voltar a acompanhar o andamento.'
+        }
+        : canFinalizeWithDocuments
+            ? {
+                tone: 'success',
+                title: 'Antes de concluir',
+                text: 'Baixe os comprovantes, junte aos autos do processo e depois clique em Concluído para retirar esta solicitação da sua fila.'
+            }
+            : null;
     const selectedPrazoFatalState = getPrazoFatalState(selectedSolicitacao?.prazo_fatal_em, selectedSolicitacao?.status_robo);
     const createdByDisplay = selectedSolicitacao?.usuario_criacao?.username || 'N/A';
     const treatedByDisplay = selectedSolicitacao?.usuario_finalizacao
@@ -1744,7 +1831,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                             {/* Opção Resetar Pendente (se não arquivado) */}
                                             {!selectedSolicitacao.is_archived && (
                                                 <button onClick={handleResetPendente} disabled={isModalLoading} className="dropdown-item">
-                                                    Resetar Pendente
+                                                    {canReturnToMonitoring ? 'Retornar ao monitoramento' : 'Resetar pendente'}
                                                 </button>
                                             )}
                                             {/* Opção Arquivar/Desarquivar (somente admin) */}
@@ -1794,6 +1881,13 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                     <span className="modal-status-helper">Use como referencia operacional.</span>
                                 </div>
                              </div>
+
+                             {modalActionHint && (
+                                <div className={`modal-callout modal-callout-${modalActionHint.tone}`}>
+                                    <strong className="modal-callout-title">{modalActionHint.title}</strong>
+                                    <span className="modal-callout-text">{modalActionHint.text}</span>
+                                </div>
+                             )}
 
                              <div className="modal-section">
                                 <h4 className="modal-section-title">Dados Essenciais</h4>
@@ -1857,7 +1951,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
 
                              <div className="modal-documents-section">
                                 <div className="modal-divider-header"><hr/><span className="divider-text">DOCUMENTOS</span><hr/></div>
-                                <ul className="modal-files-list">{formatComprovantes(selectedSolicitacao.comprovantes_path)}</ul>
+                                <ul className="modal-files-list">{formatComprovantes(selectedComprovantes)}</ul>
                              </div>
 
                              {internalContextItems.length > 0 && (
@@ -1875,20 +1969,26 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                              )}
                         </div>
                          <div className="modal-footer">
-                            {/* Botão Concluído (Marcar como Tratado) */}
-                            {/* Condição: Não arquivado E status robô inclui 'finalizado' E ainda não foi finalizado pelo usuário */}
-                            {!selectedSolicitacao.is_archived && selectedSolicitacao.status_robo?.toLowerCase().includes('finalizado') && !selectedSolicitacao.usuario_finalizacao_id && (
+                            {canReturnToMonitoring && (
+                                <button
+                                    onClick={handleResetPendente}
+                                    className="button small warning"
+                                    disabled={isModalLoading}
+                                    title="Depois de corrigir e reenviar no portal, devolva esta solicitação para a fila do robô"
+                                >
+                                    {isModalLoading ? '...' : 'Retornar ao monitoramento'}
+                                </button>
+                            )}
+                            {canFinalizeWithDocuments && (
                                 <button
                                     onClick={handleFinalizarTratamento}
-                                    className="button small success" // Estilo verde
+                                    className="button small success"
                                     disabled={isModalLoading}
-                                    title="Marcar que os documentos foram tratados/inseridos no sistema externo"
+                                    title="Marcar que os comprovantes já foram baixados e tratados fora do OneCost"
                                 >
                                     {isModalLoading ? '...' : 'Concluído'}
                                 </button>
                             )}
-                             {/* Botão Fechar (agora sem texto, só o ícone no header) */}
-                             {/* <button onClick={closeModal} className="button secondary small" disabled={isModalLoading}>Fechar</button> */}
                         </div>
                     </div>
                 </div>,

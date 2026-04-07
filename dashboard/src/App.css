@@ -590,6 +590,38 @@ tbody tr:hover .table-actions-cell {
   min-height: 28px;
 }
 
+.modal-callout {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.modal-callout-warning {
+  background: rgba(240, 173, 78, 0.12);
+  border-color: rgba(240, 173, 78, 0.28);
+}
+
+.modal-callout-success {
+  background: rgba(46, 204, 113, 0.1);
+  border-color: rgba(46, 204, 113, 0.24);
+}
+
+.modal-callout-title {
+  color: #ecf0f1;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.modal-callout-text {
+  color: #c7d0d8;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
 .modal-section {
   margin-top: 1.2rem;
   padding-top: 1rem;
