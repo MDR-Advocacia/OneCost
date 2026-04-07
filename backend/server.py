@@ -534,7 +534,8 @@ def create_solicitacao(
             selectinload(models.SolicitacaoCusta.usuario_criacao)
         ).filter(
             models.SolicitacaoCusta.npj == npj_normalizado,
-            models.SolicitacaoCusta.numero_solicitacao == numero_solicitacao_normalizado
+            models.SolicitacaoCusta.numero_solicitacao == numero_solicitacao_normalizado,
+            models.SolicitacaoCusta.is_archived.is_(False)
         ).order_by(models.SolicitacaoCusta.id.desc()).all()
 
         if solicitacoes_existentes:

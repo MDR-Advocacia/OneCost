@@ -49,6 +49,30 @@ def run_light_migrations() -> None:
         conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_solicitacoes_custas_setor_criacao ON solicitacoes_custas (setor_criacao)")
         conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_solicitacoes_custas_prazo_fatal_em ON solicitacoes_custas (prazo_fatal_em)")
         conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_solicitacoes_custas_proxima_verificacao_em ON solicitacoes_custas (proxima_verificacao_em)")
+        duplicate_exists = conn.exec_driver_sql(
+            """
+            SELECT 1
+            FROM (
+                SELECT npj, numero_solicitacao
+                FROM solicitacoes_custas
+                WHERE is_archived = FALSE
+                GROUP BY npj, numero_solicitacao
+                HAVING COUNT(*) > 1
+            ) AS duplicadas
+            LIMIT 1
+            """
+        ).scalar()
+        if not duplicate_exists:
+            conn.exec_driver_sql(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_solicitacoes_custas_npj_numero_active
+                ON solicitacoes_custas (npj, numero_solicitacao)
+                WHERE is_archived = FALSE
+                """
+            )
+            print("[bootstrap] Índice único parcial de NPJ + número garantido para registros ativos.")
+        else:
+            print("[bootstrap] Índice único parcial ainda não criado: existem duplicatas ativas para sanear.")
     print("[bootstrap] Migrações leves aplicadas.")
 
 
