@@ -67,6 +67,40 @@ def _request_with_reauth(method: str, url: str, *, retry_on_401: bool = True, **
     retry_kwargs['headers'] = _build_headers(kwargs.get('headers'))
     return requests.request(method, url, **retry_kwargs)
 
+
+def _normalize_status_portal(value: Optional[str]) -> str:
+    return str(value or "").strip().lower()
+
+
+def _get_pending_priority_bucket(solicitacao: Dict[str, Any]) -> int:
+    """
+    Prioriza o que acelera o fluxo financeiro:
+    0. Já está em 'Aguardando Confirmação' no banco
+    1. Já está em 'Aguardando Efetivação' no banco
+    2. Marcadas internamente como aguardando confirmação
+    3. Demais pendentes
+    """
+    status_portal = _normalize_status_portal(solicitacao.get("status_portal"))
+
+    if "aguardando confirmação" in status_portal or "aguardando confirmacao" in status_portal:
+        return 0
+    if "aguardando efetivação" in status_portal or "aguardando efetivacao" in status_portal:
+        return 1
+    if bool(solicitacao.get("aguardando_confirmacao")):
+        return 2
+    return 3
+
+
+def _sort_pending_solicitacoes(solicitacoes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Ordena a fila priorizando confirmação e, em seguida, o restante por ID antigo."""
+    return sorted(
+        solicitacoes,
+        key=lambda item: (
+            _get_pending_priority_bucket(item),
+            item.get("id", 0),
+        ),
+    )
+
 def _fetch_robot_user_id() -> Optional[int]:
     """Busca o ID do usuário robô logado usando o endpoint /users/me."""
     if not _api_token:
@@ -234,9 +268,18 @@ def get_todas_solicitacoes_pendentes() -> List[Dict[str, Any]]:
         response.raise_for_status()
         solicitacoes = response.json()
         if solicitacoes and isinstance(solicitacoes, list):
-            log.info(f"{len(solicitacoes)} solicitações pendentes encontradas.")
-            # Retorna a lista ordenada por ID, da mais antiga para a mais nova
-            return sorted(solicitacoes, key=lambda x: x.get('id', 0))
+            solicitacoes_ordenadas = _sort_pending_solicitacoes(solicitacoes)
+            qtd_confirmacao = sum(1 for item in solicitacoes if _get_pending_priority_bucket(item) == 0)
+            qtd_efetivacao = sum(1 for item in solicitacoes if _get_pending_priority_bucket(item) == 1)
+            qtd_marcadas = sum(1 for item in solicitacoes if _get_pending_priority_bucket(item) == 2)
+            log.info(
+                "%s solicitações pendentes encontradas. Priorização ativa: %s aguardando confirmação, %s aguardando efetivação, %s marcadas internamente para confirmação.",
+                len(solicitacoes_ordenadas),
+                qtd_confirmacao,
+                qtd_efetivacao,
+                qtd_marcadas,
+            )
+            return solicitacoes_ordenadas
         else:
             log.info("Nenhuma solicitação pendente encontrada ou formato inválido.")
             return []
