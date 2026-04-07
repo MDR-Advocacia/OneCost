@@ -27,7 +27,6 @@ const CopyIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="icon
 const EllipsisVerticalIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="icon icon-ellipsis" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}> <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" /> </svg> );
 const CloseIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="icon icon-close" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}> <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /> </svg> );
 const DetailsIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="icon icon-details" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"> <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /> </svg> );
-const ChevronDownIcon = ({ isOpen }) => ( <svg xmlns="http://www.w3.org/2000/svg" className={`icon icon-chevron ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}> <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /> </svg> );
 const AdminIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="icon icon-admin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}> <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /> <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /> </svg> );
 const EditIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="icon icon-edit" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}> <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /> </svg> );
 
@@ -1111,7 +1110,6 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [copyStatus, setCopyStatus] = useState('');
     const isAdmin = currentUser?.role === 'admin';
-    const [showRobotInfo, setShowRobotInfo] = useState(false); // Estado do Accordion
     const menuRef = useRef(null); // Ref para fechar dropdown
 
     // --- Estados para Filtros ---
@@ -1244,7 +1242,6 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
         setModalError('');
         setIsMenuOpen(false); // Fecha menu ao abrir modal
         setCopyStatus(''); // Limpa status de cópia
-        setShowRobotInfo(false); // Fecha accordion
     };
 
     const closeModal = () => {
@@ -1388,6 +1385,37 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
         }
     };
 
+    const selectedPortalStatusClass = getPortalStatusClass(selectedSolicitacao?.status_portal);
+    const selectedRobotStatusClass = getRobotStatusClass(
+        selectedSolicitacao?.status_robo,
+        selectedSolicitacao?.is_archived,
+        Boolean(selectedSolicitacao?.usuario_finalizacao_id)
+    );
+    const selectedPrazoFatalState = getPrazoFatalState(selectedSolicitacao?.prazo_fatal_em, selectedSolicitacao?.status_robo);
+    const createdByDisplay = selectedSolicitacao?.usuario_criacao?.username || 'N/A';
+    const treatedByDisplay = selectedSolicitacao?.usuario_finalizacao
+        ? `${selectedSolicitacao.usuario_finalizacao.username}${selectedSolicitacao.data_finalizacao ? ` em ${formatDataHora(selectedSolicitacao.data_finalizacao)}` : ''}`
+        : 'Ainda não tratado';
+    const archivedByDisplay = selectedSolicitacao?.is_archived
+        ? `${selectedSolicitacao.usuario_arquivamento?.username || 'Admin'}${selectedSolicitacao.data_arquivamento ? ` em ${formatDataHora(selectedSolicitacao.data_arquivamento)}` : ''}`
+        : 'Não arquivado';
+    const internalContextItems = [
+        selectedSolicitacao?.motivo_encerramento
+            ? { label: 'Motivo do encerramento', value: selectedSolicitacao.motivo_encerramento }
+            : null,
+        selectedSolicitacao?.usuario_confirmacao?.username
+            ? {
+                label: 'Confirmado pelo robô',
+                value: selectedSolicitacao.ultima_verificacao_robo
+                    ? `${selectedSolicitacao.usuario_confirmacao.username} em ${formatDataHora(selectedSolicitacao.ultima_verificacao_robo)}`
+                    : selectedSolicitacao.usuario_confirmacao.username
+            }
+            : null,
+        selectedSolicitacao?.ultima_verificacao_robo
+            ? { label: 'Última verificação', value: formatDataHora(selectedSolicitacao.ultima_verificacao_robo) }
+            : null
+    ].filter(Boolean);
+
 
     return (
         <div className="card process-table-container">
@@ -1428,19 +1456,19 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
             </div>
 
              <div className="table-wrapper">
-                <table>
+                <table className="process-table">
                     <thead>
                         <tr>
-                            <th>NPJ</th>
-                            <th className="th-narrow">Nº</th> {/* Cabeçalho ajustado */}
-                            <th className="th-valor">Valor</th> {/* Classe para alinhamento */}
-                            <th>Data Solicitação</th>
-                            <th>Prazo Fatal</th>
-                            <th>Criado Por</th>
-                            <th>Setor</th>
-                            <th style={{minWidth: '220px'}}>Status Banco</th>
-                            <th style={{minWidth: '220px'}}>Status Robô</th>
-                            <th style={{textAlign: 'center'}}>Ações</th>
+                            <th className="col-npj">NPJ</th>
+                            <th className="th-narrow col-numero">Nº</th> {/* Cabeçalho ajustado */}
+                            <th className="th-valor col-valor">Valor</th> {/* Classe para alinhamento */}
+                            <th className="col-data">Data Solicitação</th>
+                            <th className="col-prazo">Prazo Fatal</th>
+                            <th className="col-criado-por">Criado Por</th>
+                            <th className="col-setor">Setor</th>
+                            <th className="col-status-banco">Status Banco</th>
+                            <th className="col-status-robo">Status Robô</th>
+                            <th className="table-actions-header">Ações</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1469,18 +1497,18 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
 
                                 return (
                                     <tr key={item.id} className={item.is_archived ? 'archived-row' : ''}>
-                                        <td>{item.npj}</td>
-                                        <td className="td-narrow">{item.numero_solicitacao}</td> {/* Estilo aplicado */}
-                                        <td className="td-valor">{formatValorDisplay(item.valor)}</td> {/* Estilo aplicado */}
-                                        <td>{formatDataHora(item.data_solicitacao)}</td>
-                                        <td>
+                                        <td className="cell-npj">{item.npj}</td>
+                                        <td className="td-narrow cell-number">{item.numero_solicitacao}</td> {/* Estilo aplicado */}
+                                        <td className="td-valor cell-value">{formatValorDisplay(item.valor)}</td> {/* Estilo aplicado */}
+                                        <td className="cell-date">{formatDataHora(item.data_solicitacao)}</td>
+                                        <td className="cell-deadline">
                                             <span className={`deadline-chip deadline-${prazoFatalState}`} title={prazoFatalLabel}>
                                                 {prazoFatalLabel}
                                             </span>
                                         </td>
-                                        <td>{item.usuario_criacao?.username || 'N/A'}</td>
-                                        <td>{getSolicitacaoSectorValue(item) || 'Sem setor'}</td>
-                                        <td>
+                                        <td className="cell-owner">{item.usuario_criacao?.username || 'N/A'}</td>
+                                        <td className="cell-sector">{getSolicitacaoSectorValue(item) || 'Sem setor'}</td>
+                                        <td className="cell-status">
                                           <div className="status-cell status-cell-stacked">
                                             <span
                                               className={`status-indicator status-${statusPortalClasse}`}
@@ -1491,7 +1519,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                             </span>
                                           </div>
                                         </td>
-                                        <td>
+                                        <td className="cell-status">
                                           <div className="status-cell status-cell-stacked">
                                             {!item.is_archived && !item.usuario_finalizacao_id && (
                                                 <span
@@ -1504,7 +1532,7 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                             </span>
                                           </div>
                                         </td>
-                                        <td style={{textAlign: 'center'}}>
+                                        <td className="table-actions-cell">
                                             <button onClick={() => openModal(item)} className="action-button details-button" title="Ver Detalhes">
                                                 <DetailsIcon /> {/* Ícone SVG */}
                                             </button>
@@ -1605,47 +1633,90 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                         <div className="modal-body">
                              {modalError && <p className="form-message error modal-error">{modalError}</p>}
 
-                             {/* Layout do Modal Atualizado */}
-                             <div className="modal-detail-line">
-                                <p><strong className="modal-label">NPJ:</strong> {selectedSolicitacao.npj}</p>
-                                <div className="modal-field-with-action">
-                                     <p><strong className="modal-label">Número CNJ:</strong> {selectedSolicitacao.numero_processo || 'N/A'}</p>
-                                     {selectedSolicitacao.numero_processo && (
-                                        <button onClick={() => handleCopyToClipboard(selectedSolicitacao.numero_processo)} className="modal-copy-button" title="Copiar Nº Processo">
-                                            <CopyIcon />
-                                            {copyStatus && <span className="copy-feedback">{copyStatus}</span>}
-                                        </button>
-                                     )}
-                                 </div>
+                             <div className="modal-status-grid">
+                                <div className="modal-status-card">
+                                    <span className="modal-status-caption">Status do Banco</span>
+                                    <span className={`modal-status-text status-${selectedPortalStatusClass}`}>
+                                        {selectedSolicitacao.status_portal || 'Sem retorno do banco'}
+                                    </span>
+                                    <span className="modal-status-helper">Ultimo retorno visto no portal.</span>
+                                </div>
+                                <div className="modal-status-card">
+                                    <span className="modal-status-caption">Status no OneCost</span>
+                                    <span className={`modal-status-text status-${selectedRobotStatusClass}`}>
+                                        {selectedSolicitacao.status_robo || 'Pendente'}
+                                    </span>
+                                    <span className="modal-status-helper">Situacao atual do fluxo interno.</span>
+                                </div>
+                                <div className="modal-status-card">
+                                    <span className="modal-status-caption">Prazo Fatal</span>
+                                    <span className="modal-deadline-block">
+                                        <span className={`deadline-chip deadline-${selectedPrazoFatalState}`}>
+                                            {selectedSolicitacao.prazo_fatal_em ? formatDataHora(selectedSolicitacao.prazo_fatal_em) : 'Nao definido'}
+                                        </span>
+                                    </span>
+                                    <span className="modal-status-helper">Use como referencia operacional.</span>
+                                </div>
                              </div>
 
-                             <div className="modal-detail-line">
-                                <p><strong className="modal-label">Tipo Custa:</strong> {selectedSolicitacao.especificacao || 'N/A'}</p> {/* Exibindo especificacao */}
-                                <p><strong className="modal-label">Número:</strong> {selectedSolicitacao.numero_solicitacao}</p>
-                                <p><strong className="modal-label">Valor:</strong> {formatValorDisplay(selectedSolicitacao.valor)}</p>
-                                <p><strong className="modal-label">Data:</strong> {formatDataHora(selectedSolicitacao.data_solicitacao)}</p>
+                             <div className="modal-section">
+                                <h4 className="modal-section-title">Dados Essenciais</h4>
+                                <div className="modal-meta-grid">
+                                    <div className="modal-meta-item">
+                                        <span className="modal-label">NPJ</span>
+                                        <span className="modal-meta-value">{selectedSolicitacao.npj}</span>
+                                    </div>
+                                    <div className="modal-meta-item">
+                                        <span className="modal-label">Numero CNJ</span>
+                                        <div className="modal-field-with-action modal-field-with-action-compact">
+                                            <span className="modal-meta-value">{selectedSolicitacao.numero_processo || 'N/A'}</span>
+                                            {selectedSolicitacao.numero_processo && (
+                                                <button onClick={() => handleCopyToClipboard(selectedSolicitacao.numero_processo)} className="modal-copy-button" title="Copiar Nº Processo">
+                                                    <CopyIcon />
+                                                    {copyStatus && <span className="copy-feedback">{copyStatus}</span>}
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="modal-meta-item">
+                                        <span className="modal-label">Tipo de Custa</span>
+                                        <span className="modal-meta-value">{selectedSolicitacao.especificacao || 'N/A'}</span>
+                                    </div>
+                                    <div className="modal-meta-item">
+                                        <span className="modal-label">Numero</span>
+                                        <span className="modal-meta-value">{selectedSolicitacao.numero_solicitacao}</span>
+                                    </div>
+                                    <div className="modal-meta-item">
+                                        <span className="modal-label">Valor</span>
+                                        <span className="modal-meta-value">{formatValorDisplay(selectedSolicitacao.valor)}</span>
+                                    </div>
+                                    <div className="modal-meta-item">
+                                        <span className="modal-label">Data da Solicitacao</span>
+                                        <span className="modal-meta-value">{formatDataHora(selectedSolicitacao.data_solicitacao)}</span>
+                                    </div>
+                                    <div className="modal-meta-item">
+                                        <span className="modal-label">Setor</span>
+                                        <span className="modal-meta-value">{getSolicitacaoSectorValue(selectedSolicitacao) || 'Sem setor'}</span>
+                                    </div>
+                                </div>
                              </div>
 
-                             <div className="modal-detail-line">
-                                <p><strong className="modal-label">Status do Banco:</strong> <span className={`modal-status-text status-${getPortalStatusClass(selectedSolicitacao.status_portal)}`}>{selectedSolicitacao.status_portal || 'Sem retorno do banco'}</span></p>
-                                <p><strong className="modal-label">Status do Robô:</strong> <span className={`modal-status-text status-${getRobotStatusClass(selectedSolicitacao.status_robo, selectedSolicitacao.is_archived, Boolean(selectedSolicitacao.usuario_finalizacao_id))}`}>{selectedSolicitacao.status_robo || 'Pendente'}</span></p>
-                             </div>
-
-                             <div className="modal-detail-line">
-                                <p><strong className="modal-label">Prazo Fatal:</strong> {formatDataHora(selectedSolicitacao.prazo_fatal_em)}</p>
-                                <p><strong className="modal-label">Próxima Verificação:</strong> {formatDataHora(selectedSolicitacao.proxima_verificacao_em)}</p>
-                                <p><strong className="modal-label">Alerta Enviado:</strong> {formatDataHora(selectedSolicitacao.alerta_enviado_em)}</p>
-                             </div>
-
-                             <div className="modal-detail-line">
-                                <p><strong className="modal-label">Monitoramento:</strong> {selectedSolicitacao.monitoramento_ativo ? 'Ativo' : 'Suspenso'}</p>
-                                <p><strong className="modal-label">Motivo Encerramento:</strong> {selectedSolicitacao.motivo_encerramento || 'N/A'}</p>
-                             </div>
-
-                             <div className="modal-detail-line user-info-line">
-                                <p><strong className="modal-label-sm">Criado por:</strong> {selectedSolicitacao.usuario_criacao?.username || 'N/A'}</p>
-                                <p><strong className="modal-label-sm">Tratado por:</strong> {selectedSolicitacao.usuario_finalizacao?.username || 'Não'} {selectedSolicitacao.data_finalizacao ? `em ${formatDataHora(selectedSolicitacao.data_finalizacao)}` : ''}</p>
-                                <p><strong className="modal-label-sm">Arquivado por:</strong> {selectedSolicitacao.usuario_arquivamento?.username || 'Não'} {selectedSolicitacao.data_arquivamento ? `em ${formatDataHora(selectedSolicitacao.data_arquivamento)}` : ''}</p>
+                             <div className="modal-section">
+                                <h4 className="modal-section-title">Responsaveis</h4>
+                                <div className="modal-meta-grid modal-meta-grid-compact">
+                                    <div className="modal-meta-item">
+                                        <span className="modal-label">Criado por</span>
+                                        <span className="modal-meta-value">{createdByDisplay}</span>
+                                    </div>
+                                    <div className="modal-meta-item">
+                                        <span className="modal-label">Tratado por</span>
+                                        <span className="modal-meta-value">{treatedByDisplay}</span>
+                                    </div>
+                                    <div className="modal-meta-item">
+                                        <span className="modal-label">Arquivamento</span>
+                                        <span className="modal-meta-value">{archivedByDisplay}</span>
+                                    </div>
+                                </div>
                              </div>
 
                              <div className="modal-documents-section">
@@ -1653,23 +1724,19 @@ const SolicitacoesTable = ({ solicitacoes: allSolicitacoes, currentUser, onDataR
                                 <ul className="modal-files-list">{formatComprovantes(selectedSolicitacao.comprovantes_path)}</ul>
                              </div>
 
-                             {/* Accordion Robô */}
-                             <div className="accordion-container">
-                                <button onClick={() => setShowRobotInfo(!showRobotInfo)} className="accordion-button" aria-expanded={showRobotInfo}>
-                                    <span>Detalhes do Robô</span>
-                                    <ChevronDownIcon isOpen={showRobotInfo} />
-                                </button>
-                                {showRobotInfo && (
-                                    <div className="accordion-content">
-                                        <p><strong className="modal-label-alt">Confirmação Solicitada:</strong> {selectedSolicitacao.aguardando_confirmacao ? 'Sim' : 'Não'}</p>
-                                        <p><strong className="modal-label-alt">Status Robô (nosso sistema):</strong> {selectedSolicitacao.status_robo || 'Pendente'}</p>
-                                        <p><strong className="modal-label-alt">Status Portal (banco):</strong> {selectedSolicitacao.status_portal || 'N/A'}</p>
-                                        <p><strong className="modal-label-alt">Última Verificação:</strong> {formatDataHora(selectedSolicitacao.ultima_verificacao_robo)}</p>
-                                        <p><strong className="modal-label-alt">Próxima Verificação:</strong> {formatDataHora(selectedSolicitacao.proxima_verificacao_em)}</p>
-                                        <p><strong className="modal-label-alt">Confirmado (Robô) por:</strong> {selectedSolicitacao.usuario_confirmacao?.username || 'N/A'}</p>
+                             {internalContextItems.length > 0 && (
+                                <div className="modal-section">
+                                    <h4 className="modal-section-title">Contexto Interno</h4>
+                                    <div className="modal-meta-grid modal-meta-grid-compact">
+                                        {internalContextItems.map((item) => (
+                                            <div key={item.label} className="modal-meta-item">
+                                                <span className="modal-label">{item.label}</span>
+                                                <span className="modal-meta-value">{item.value}</span>
+                                            </div>
+                                        ))}
                                     </div>
-                                )}
-                            </div>
+                                </div>
+                             )}
                         </div>
                          <div className="modal-footer">
                             {/* Botão Concluído (Marcar como Tratado) */}
