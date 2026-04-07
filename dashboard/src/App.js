@@ -32,6 +32,8 @@ const EditIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="icon
 
 
 // --- Funções Auxiliares ---
+const APP_TIME_ZONE = 'America/Fortaleza';
+
 const formatDataHora = (dataString) => {
     if (!dataString) return 'N/A';
     try {
@@ -52,8 +54,11 @@ const formatDataHora = (dataString) => {
         }
         // Verifica se a string original parece ter hora
         if (dataString.includes('T') || dataString.includes(' ')) {
-             // Para data/hora completas, retorna formato local completo
-            return data.toLocaleString('pt-BR', {}); // Formato data e hora local
+             // Para data/hora completas, fixa o timezone do produto em GMT-3
+            return data.toLocaleString('pt-BR', {
+                timeZone: APP_TIME_ZONE,
+                hour12: false,
+            });
         } else {
              // Para strings que são apenas data (mas parseadas com sucesso), retorna só data (UTC)
             return data.toLocaleDateString('pt-BR', { timeZone: 'UTC' }); // Formato só data (considera UTC)
