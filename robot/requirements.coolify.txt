@@ -1,4 +1,4 @@
-playwright
+playwright==1.58.0
 python-dotenv
 requests
 python-logging-loki==0.3.1

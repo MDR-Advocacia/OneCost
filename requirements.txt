@@ -9,7 +9,7 @@ SQLAlchemy
 psycopg2-binary 
 
 # --- RPA (Playwright) ---
-playwright
+playwright==1.58.0
 python-dotenv
 
 # --- Comunicação (API Client) ---
