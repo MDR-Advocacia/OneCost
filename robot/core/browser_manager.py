@@ -5,9 +5,7 @@ from typing import Tuple
 
 from config import (
     URL_PORTAL_CUSTAS,
-    BB_BROWSER_PROXY_SERVER,
-    BB_BROWSER_PROXY_USERNAME,
-    BB_BROWSER_PROXY_PASSWORD,
+    escolher_bb_browser_proxy,
 )
 from utils.onelog_client import obter_sessao_onelog
 
@@ -24,13 +22,7 @@ def realizar_login_automatico(playwright: Playwright) -> Tuple[Browser, BrowserC
     dados_sessao = obter_sessao_onelog()
     cookies_onelog = dados_sessao.get("cookies", [])
     user_agent_onelog = dados_sessao.get("user_agent")
-    proxy_config = dados_sessao.get("proxy")
-    if BB_BROWSER_PROXY_SERVER:
-        proxy_config = {"server": BB_BROWSER_PROXY_SERVER}
-        if BB_BROWSER_PROXY_USERNAME:
-            proxy_config["username"] = BB_BROWSER_PROXY_USERNAME
-        if BB_BROWSER_PROXY_PASSWORD:
-            proxy_config["password"] = BB_BROWSER_PROXY_PASSWORD
+    proxy_config = escolher_bb_browser_proxy()
     if proxy_config:
         log.info("Proxy do navegador BB habilitado: %s", proxy_config.get("server"))
 

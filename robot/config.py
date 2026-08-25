@@ -1,4 +1,5 @@
 import os
+import random
 import logging
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
@@ -100,6 +101,26 @@ ROBOT_MONITORING_RECHECK_MINUTES = int(os.getenv("ROBOT_MONITORING_RECHECK_MINUT
 ROBOT_RESET_ERRORS_ON_START = _env_bool("ROBOT_RESET_ERRORS_ON_START", "false")
 
 # Proxy opcional para o navegador que acessa o portal BB.
-BB_BROWSER_PROXY_SERVER = os.getenv("BB_BROWSER_PROXY_SERVER", "").strip()
+# Espelha o OneLog: aceita uma lista em PROXY_LIST/BB_BROWSER_PROXY_LIST e escolhe
+# um endpoint no momento de abrir o Chromium.
+_proxy_env = (
+    os.getenv("BB_BROWSER_PROXY_LIST")
+    or os.getenv("PROXY_LIST")
+    or os.getenv("BB_BROWSER_PROXY_SERVER", "")
+)
+BB_BROWSER_PROXY_SERVERS = [p.strip() for p in _proxy_env.split(",") if p.strip()]
+BB_BROWSER_PROXY_SERVER = BB_BROWSER_PROXY_SERVERS[0] if BB_BROWSER_PROXY_SERVERS else ""
 BB_BROWSER_PROXY_USERNAME = os.getenv("BB_BROWSER_PROXY_USERNAME", "").strip()
 BB_BROWSER_PROXY_PASSWORD = os.getenv("BB_BROWSER_PROXY_PASSWORD", "").strip()
+
+
+def escolher_bb_browser_proxy() -> dict | None:
+    if not BB_BROWSER_PROXY_SERVERS:
+        return None
+
+    proxy_config = {"server": random.choice(BB_BROWSER_PROXY_SERVERS)}
+    if BB_BROWSER_PROXY_USERNAME:
+        proxy_config["username"] = BB_BROWSER_PROXY_USERNAME
+    if BB_BROWSER_PROXY_PASSWORD:
+        proxy_config["password"] = BB_BROWSER_PROXY_PASSWORD
+    return proxy_config

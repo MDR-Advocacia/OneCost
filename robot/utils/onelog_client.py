@@ -2,7 +2,7 @@
 import time
 import requests
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 _ultimo_marcapasso = 0
 _setor_atual = None  # NOVO: Vai guardar o setor exato retornado pelo OneLog
@@ -19,43 +19,6 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
-
-def _extrair_proxy_config(data: Dict[str, Any]) -> Optional[Dict[str, str]]:
-    """Extrai proxy de respostas do OneLog sem expor credenciais em log."""
-    proxy_data = (
-        data.get("proxy")
-        or data.get("browser_proxy")
-        or data.get("proxy_config")
-        or data.get("playwright_proxy")
-    )
-
-    if isinstance(proxy_data, str) and proxy_data.strip():
-        return {"server": proxy_data.strip()}
-
-    if not isinstance(proxy_data, dict):
-        proxy_server = data.get("proxy_server") or data.get("proxy_url")
-        if proxy_server:
-            proxy_data = {
-                "server": proxy_server,
-                "username": data.get("proxy_username"),
-                "password": data.get("proxy_password"),
-            }
-        else:
-            return None
-
-    server = proxy_data.get("server") or proxy_data.get("url") or proxy_data.get("proxy_server")
-    if not server:
-        return None
-
-    proxy_config = {"server": str(server).strip()}
-    username = proxy_data.get("username") or proxy_data.get("user")
-    password = proxy_data.get("password") or proxy_data.get("pass")
-    if username:
-        proxy_config["username"] = str(username)
-    if password:
-        proxy_config["password"] = str(password)
-    return proxy_config
 
 def obter_sessao_onelog() -> Dict[str, Any]:
     global _setor_atual
@@ -87,7 +50,6 @@ def obter_sessao_onelog() -> Dict[str, Any]:
             return {
                 "cookies": data_login.get("cookies", []),
                 "user_agent": DEFAULT_USER_AGENT,
-                "proxy": _extrair_proxy_config(data_login),
             }
 
         log.info("Login enfileirado no OneLog. Aguardando processamento...")
@@ -118,7 +80,6 @@ def obter_sessao_onelog() -> Dict[str, Any]:
                     return {
                         "cookies": session_data.get("cookies", []),
                         "user_agent": session_data.get("user_agent", DEFAULT_USER_AGENT),
-                        "proxy": _extrair_proxy_config(session_data),
                     }
                 else:
                     raise Exception("Erro ao resgatar sessão final do OneLog.")
