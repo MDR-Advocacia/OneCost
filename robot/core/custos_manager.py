@@ -2,6 +2,7 @@ import logging
 import re
 import time
 from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Dict, List, Any
 import json
@@ -9,7 +10,7 @@ import json
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, expect
 
 # Importar constantes do config
-from config import COMPROVANTES_DIR, DOWNLOAD_TIMEOUT
+from config import COMPROVANTES_DIR, DOWNLOAD_TIMEOUT, ROBOT_MONITORING_RECHECK_MINUTES
 from core.session_manager import SessionExpiredError
 # Importar o ID do usuário robô (preenchido após o login)
 from utils.api_client import _robot_user_id
@@ -24,6 +25,11 @@ def _limpar_nome_arquivo(nome: Any) -> str:
     nome = re.sub(r'_+', '_', nome)
     nome = nome.strip('_')
     return nome if nome else "arquivo"
+
+
+def _agendar_proxima_verificacao(minutos: int = ROBOT_MONITORING_RECHECK_MINUTES) -> str:
+    """Retorna timestamp UTC ISO para a próxima consulta do monitoramento."""
+    return (datetime.now(timezone.utc) + timedelta(minutes=minutos)).isoformat()
 
 def _converter_valor_para_decimal(valor_texto: Optional[str]) -> Optional[Decimal]:
     """Converte string formatada (ex: 'R$ 1.234,56') para Decimal."""
@@ -766,6 +772,7 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
             resultado_final["status_robo"] = "Erro: Status do portal inválido ou não lido"
             resultado_final["monitoramento_ativo"] = True
             resultado_final["motivo_encerramento"] = None
+            resultado_final["proxima_verificacao_em"] = _agendar_proxima_verificacao(15)
 
         # --- AÇÃO: Monitoramento do banco sem comprovante ainda ---
         elif any(s.lower() in status_portal_inicial.lower() for s in status_de_monitoramento) and voltar_para_lista_necessario:
@@ -773,6 +780,11 @@ def processar_solicitacao_especifica(page: Page, solicitacao_info: Dict[str, Any
             resultado_final["status_robo"] = "Monitorando retorno do banco"
             resultado_final["monitoramento_ativo"] = True
             resultado_final["motivo_encerramento"] = None
+            resultado_final["proxima_verificacao_em"] = _agendar_proxima_verificacao()
+            logging.info(
+                "Próxima verificação agendada para %s.",
+                resultado_final["proxima_verificacao_em"],
+            )
 
         # --- AÇÃO: Nenhuma Ação Específica (Apenas Monitoramento e Captura de Dados) ---
         elif voltar_para_lista_necessario: # Só executa se conseguiu entrar nos detalhes

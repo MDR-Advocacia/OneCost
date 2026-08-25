@@ -4,16 +4,29 @@ import logging
 from typing import Optional, Dict, List, Any
 import json
 from decimal import Decimal # Para tratar o valor corretamente no payload
+from datetime import datetime, date, timezone, timedelta
 
 # Importar configs
 try:
     # Tenta importar ROBOT_USERNAME também, para log de erro 403
-    from config import API_BASE_URL, ROBOT_USERNAME, ROBOT_PASSWORD
+    from config import (
+        API_BASE_URL,
+        ROBOT_USERNAME,
+        ROBOT_PASSWORD,
+        ROBOT_QUEUE_STATUSES,
+        ROBOT_MAX_ITEMS_PER_CYCLE,
+        ROBOT_RECENT_PENDING_DAYS,
+        ROBOT_MONITORING_LOOKBACK_DAYS,
+    )
 except ImportError:
     # Fallback se executado de forma isolada
     API_BASE_URL = os.getenv("API_BASE_URL", "http://onecost-backend:8000")
     ROBOT_USERNAME = "robô_desconhecido" # Define um fallback
     ROBOT_PASSWORD = os.getenv("ROBOT_PASSWORD", "default_password")
+    ROBOT_QUEUE_STATUSES = os.getenv("ROBOT_QUEUE_STATUSES", "Pendente,Monitorando retorno do banco")
+    ROBOT_MAX_ITEMS_PER_CYCLE = int(os.getenv("ROBOT_MAX_ITEMS_PER_CYCLE", "20"))
+    ROBOT_RECENT_PENDING_DAYS = int(os.getenv("ROBOT_RECENT_PENDING_DAYS", "10"))
+    ROBOT_MONITORING_LOOKBACK_DAYS = int(os.getenv("ROBOT_MONITORING_LOOKBACK_DAYS", "10"))
 
 
 log = logging.getLogger(__name__) # Logger específico
@@ -72,33 +85,107 @@ def _normalize_status_portal(value: Optional[str]) -> str:
     return str(value or "").strip().lower()
 
 
+def _normalize_status_robo(value: Optional[str]) -> str:
+    return str(value or "").strip().lower()
+
+
+def _parse_datetime(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _parse_date(value: Any) -> Optional[date]:
+    if not value:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _is_recent_business_date(value: Any, days: int) -> bool:
+    if days <= 0:
+        return True
+    data_solicitacao = _parse_date(value)
+    if data_solicitacao is None:
+        return True
+    return data_solicitacao >= (datetime.now(timezone.utc).date() - timedelta(days=days))
+
+
+def _is_due_for_robot(solicitacao: Dict[str, Any]) -> bool:
+    """Filtra itens agendados para o futuro e evita backlog antigo dominar o ciclo."""
+    status_robo = _normalize_status_robo(solicitacao.get("status_robo"))
+
+    proxima_verificacao = _parse_datetime(solicitacao.get("proxima_verificacao_em"))
+    if proxima_verificacao and proxima_verificacao > datetime.now(timezone.utc):
+        return False
+
+    if "monitorando retorno do banco" in status_robo:
+        return _is_recent_business_date(
+            solicitacao.get("data_solicitacao"),
+            ROBOT_MONITORING_LOOKBACK_DAYS,
+        )
+
+    return True
+
+
 def _get_pending_priority_bucket(solicitacao: Dict[str, Any]) -> int:
     """
     Prioriza o que acelera o fluxo financeiro:
     0. Já está em 'Aguardando Confirmação' no banco
     1. Já está em 'Aguardando Efetivação' no banco
-    2. Marcadas internamente como aguardando confirmação
-    3. Demais pendentes
+    2. Pendentes recentes marcadas internamente como aguardando confirmação
+    3. Monitorando retorno do banco
+    4. Demais pendentes recentes
+    5. Pendentes antigas/incompletas
     """
+    status_robo = _normalize_status_robo(solicitacao.get("status_robo"))
     status_portal = _normalize_status_portal(solicitacao.get("status_portal"))
+    pendente = status_robo == "pendente"
 
-    if "aguardando confirmação" in status_portal or "aguardando confirmacao" in status_portal:
+    if pendente and ("aguardando confirmação" in status_portal or "aguardando confirmacao" in status_portal):
         return 0
-    if "aguardando efetivação" in status_portal or "aguardando efetivacao" in status_portal:
+    if pendente and ("aguardando efetivação" in status_portal or "aguardando efetivacao" in status_portal):
         return 1
-    if bool(solicitacao.get("aguardando_confirmacao")):
-        return 2
-    return 3
+    if pendente and bool(solicitacao.get("aguardando_confirmacao")):
+        if _is_recent_business_date(solicitacao.get("data_solicitacao"), ROBOT_RECENT_PENDING_DAYS):
+            return 2
+        return 5
+    if "monitorando retorno do banco" in status_robo:
+        return 3
+    return 4
 
 
 def _sort_pending_solicitacoes(solicitacoes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Ordena a fila priorizando confirmação e, em seguida, o restante por ID antigo."""
+    """Ordena a fila priorizando confirmação e monitoramento recente."""
+    def sort_key(item: Dict[str, Any]):
+        bucket = _get_pending_priority_bucket(item)
+        data_solicitacao = _parse_date(item.get("data_solicitacao")) or date.min
+        ultima_verificacao = _parse_datetime(item.get("ultima_verificacao_robo")) or datetime.min.replace(tzinfo=timezone.utc)
+        proxima_verificacao = _parse_datetime(item.get("proxima_verificacao_em")) or datetime.min.replace(tzinfo=timezone.utc)
+        if bucket in {0, 1}:
+            return (bucket, item.get("id", 0))
+        if bucket == 2:
+            return (bucket, -data_solicitacao.toordinal(), item.get("id", 0))
+        if bucket == 3:
+            return (bucket, proxima_verificacao, ultima_verificacao, -data_solicitacao.toordinal(), item.get("id", 0))
+        return (bucket, -data_solicitacao.toordinal(), item.get("id", 0))
+
     return sorted(
         solicitacoes,
-        key=lambda item: (
-            _get_pending_priority_bucket(item),
-            item.get("id", 0),
-        ),
+        key=sort_key,
     )
 
 def _fetch_robot_user_id() -> Optional[int]:
@@ -254,34 +341,48 @@ def get_proxima_solicitacao_pendente() -> Optional[Dict[str, Any]]:
 
 
 def get_todas_solicitacoes_pendentes() -> List[Dict[str, Any]]:
-    """Busca TODAS as solicitações com status 'Pendente'."""
+    """Busca solicitações elegíveis para o robô, incluindo monitoramento rechecável."""
     get_url = f"{API_BASE_URL}/solicitacoes/"
-    params = {"status_robo": "Pendente"}
+    queue_statuses = [s.strip() for s in ROBOT_QUEUE_STATUSES.split(",") if s.strip()]
+    params = {"status_robo": ",".join(queue_statuses or ["Pendente"])}
     headers = _build_headers()
     if not _api_token:
         log.error("Não é possível buscar solicitações: Robô não autenticado (token ausente).")
         return []
 
-    log.info(f"Buscando TODAS as solicitações pendentes em {get_url}...")
+    log.info(
+        "Buscando solicitações elegíveis em %s (status=%s, max=%s)...",
+        get_url,
+        params["status_robo"],
+        ROBOT_MAX_ITEMS_PER_CYCLE,
+    )
     try:
         response = _request_with_reauth("get", get_url, params=params, headers=headers, timeout=20) # Timeout maior
         response.raise_for_status()
         solicitacoes = response.json()
         if solicitacoes and isinstance(solicitacoes, list):
-            solicitacoes_ordenadas = _sort_pending_solicitacoes(solicitacoes)
-            qtd_confirmacao = sum(1 for item in solicitacoes if _get_pending_priority_bucket(item) == 0)
-            qtd_efetivacao = sum(1 for item in solicitacoes if _get_pending_priority_bucket(item) == 1)
-            qtd_marcadas = sum(1 for item in solicitacoes if _get_pending_priority_bucket(item) == 2)
+            solicitacoes_elegiveis = [item for item in solicitacoes if _is_due_for_robot(item)]
+            solicitacoes_ordenadas = _sort_pending_solicitacoes(solicitacoes_elegiveis)
+            if ROBOT_MAX_ITEMS_PER_CYCLE > 0:
+                solicitacoes_ordenadas = solicitacoes_ordenadas[:ROBOT_MAX_ITEMS_PER_CYCLE]
+
+            qtd_confirmacao = sum(1 for item in solicitacoes_ordenadas if _get_pending_priority_bucket(item) == 0)
+            qtd_efetivacao = sum(1 for item in solicitacoes_ordenadas if _get_pending_priority_bucket(item) == 1)
+            qtd_marcadas = sum(1 for item in solicitacoes_ordenadas if _get_pending_priority_bucket(item) == 2)
+            qtd_monitorando = sum(1 for item in solicitacoes_ordenadas if _get_pending_priority_bucket(item) == 3)
             log.info(
-                "%s solicitações pendentes encontradas. Priorização ativa: %s aguardando confirmação, %s aguardando efetivação, %s marcadas internamente para confirmação.",
+                "%s solicitações retornadas pela API; %s elegíveis agora; %s selecionadas para este ciclo. Priorização: %s aguardando confirmação, %s aguardando efetivação, %s pendentes recentes, %s monitorando banco.",
+                len(solicitacoes),
+                len(solicitacoes_elegiveis),
                 len(solicitacoes_ordenadas),
                 qtd_confirmacao,
                 qtd_efetivacao,
                 qtd_marcadas,
+                qtd_monitorando,
             )
             return solicitacoes_ordenadas
         else:
-            log.info("Nenhuma solicitação pendente encontrada ou formato inválido.")
+            log.info("Nenhuma solicitação elegível encontrada ou formato inválido.")
             return []
     except requests.exceptions.RequestException as e:
         log.error(f"Erro ao buscar TODAS as solicitações pendentes da API ({get_url}): {e}")

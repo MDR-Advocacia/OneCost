@@ -50,6 +50,10 @@ ONELOG_PASSWORD = os.getenv("ONELOG_PASSWORD", "senha_ad")
 # Timeout para esperar por downloads (em milissegundos)
 DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT_MS", "60000")) 
 
+
+def _env_bool(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "sim", "on"}
+
 # URLs das APIs
 def _normalize_internal_api_base_url(url: str) -> str:
     """Migra automaticamente o hostname legado 'backend' para o serviço atual."""
@@ -83,3 +87,19 @@ ONELOG_API_URL = os.getenv("ONELOG_API_URL", "http://api-onelog.mdradvocacia.com
 SESSION_TIMEOUT_SECONDS = int(os.getenv("SESSION_TIMEOUT_SECONDS", "1800"))
 # Janela preventiva para reciclar cookies/contexto antes da expiração habitual (~30 min)
 SESSION_RENEW_BEFORE_SECONDS = int(os.getenv("SESSION_RENEW_BEFORE_SECONDS", "1320"))
+
+# Fila e cadência do robô
+ROBOT_QUEUE_STATUSES = os.getenv(
+    "ROBOT_QUEUE_STATUSES",
+    "Pendente,Monitorando retorno do banco",
+)
+ROBOT_MAX_ITEMS_PER_CYCLE = int(os.getenv("ROBOT_MAX_ITEMS_PER_CYCLE", "20"))
+ROBOT_RECENT_PENDING_DAYS = int(os.getenv("ROBOT_RECENT_PENDING_DAYS", "10"))
+ROBOT_MONITORING_LOOKBACK_DAYS = int(os.getenv("ROBOT_MONITORING_LOOKBACK_DAYS", "10"))
+ROBOT_MONITORING_RECHECK_MINUTES = int(os.getenv("ROBOT_MONITORING_RECHECK_MINUTES", "30"))
+ROBOT_RESET_ERRORS_ON_START = _env_bool("ROBOT_RESET_ERRORS_ON_START", "false")
+
+# Proxy opcional para o navegador que acessa o portal BB.
+BB_BROWSER_PROXY_SERVER = os.getenv("BB_BROWSER_PROXY_SERVER", "").strip()
+BB_BROWSER_PROXY_USERNAME = os.getenv("BB_BROWSER_PROXY_USERNAME", "").strip()
+BB_BROWSER_PROXY_PASSWORD = os.getenv("BB_BROWSER_PROXY_PASSWORD", "").strip()

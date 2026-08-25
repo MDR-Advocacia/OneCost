@@ -25,7 +25,8 @@ try:
     # Importações de configuração
     from config import (
         URL_PORTAL_CUSTAS, LOG_DIR, ROBOT_USERNAME, ROBOT_PASSWORD,
-        SESSION_TIMEOUT_SECONDS, SESSION_RENEW_BEFORE_SECONDS
+        SESSION_TIMEOUT_SECONDS, SESSION_RENEW_BEFORE_SECONDS,
+        ROBOT_RESET_ERRORS_ON_START
     )
     # Importações dos módulos core
     from core.browser_manager import realizar_login_automatico
@@ -151,13 +152,16 @@ def main():
             general_exit_code = 1
             return general_exit_code
 
-        # FASE -0.5: Resetar Solicitações com Erro (Agora Ativo)
-        log.info("FASE -0.5: Tentando resetar solicitações com status de erro...")
-        if resetar_solicitacoes_com_erro():
-             log.info("[SUCESSO] Solicitações com erro resetadas para 'Pendente' (se houveram).")
+        # FASE -0.5: Resetar Solicitações com Erro (opcional)
+        if ROBOT_RESET_ERRORS_ON_START:
+            log.info("FASE -0.5: Tentando resetar solicitações com status de erro...")
+            if resetar_solicitacoes_com_erro():
+                 log.info("[SUCESSO] Solicitações com erro resetadas para 'Pendente' (se houveram).")
+            else:
+                 # Apenas avisa, mas continua a execução. O erro específico já foi logado pelo api_client.
+                 log.warning("Falha ao resetar erros ou nenhuma solicitação com erro encontrada. Verifique os logs da API se a falha persistir.")
         else:
-             # Apenas avisa, mas continua a execução. O erro específico já foi logado pelo api_client.
-             log.warning("Falha ao resetar erros ou nenhuma solicitação com erro encontrada. Verifique os logs da API se a falha persistir.")
+            log.info("FASE -0.5: Reset automático de erros desativado (ROBOT_RESET_ERRORS_ON_START=false).")
 
         # FASE 0: Buscar TODAS as Solicitações Pendentes na API
         log.info("FASE 0: Buscando TODAS as solicitações pendentes na API...")
